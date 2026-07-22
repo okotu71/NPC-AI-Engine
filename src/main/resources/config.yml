@@ -1,5 +1,5 @@
 # =========================================================
-# okotu-npc-ai-engine - configuration (v1.02)
+# okotu-npc-ai-engine - configuration (v1.03)
 # =========================================================
 
 # Which profile to use: "prod" or "test" (see the "prod" / "test" blocks
@@ -52,8 +52,8 @@ ollama:
   retry-delay-ms: 500
 
 conversation:
-  # How many of the most recent raw messages to include in the "ULTIMI
-  # MESSAGGI" section of the prompt (independent from the compression trigger below).
+  # How many of the most recent raw messages to include in the "RECENT
+  # MESSAGES" section of the prompt (independent from the compression trigger below).
   recent-messages: 20
   # After this many accumulated raw messages (player+npc) since the last
   # compression for a given (npc, player) pair, the plugin asks Ollama to
@@ -64,10 +64,10 @@ conversation:
   # Instruction sent to Ollama when compressing memory. {max_words} is
   # replaced with summary-max-words above.
   summary-prompt: >
-    Riassumi questa conversazione in massimo {max_words} parole, mantenendo
-    solo i fatti importanti (promesse, doni, eventi rilevanti, favori). Se e'
-    presente un riassunto precedente, integralo con i nuovi fatti invece di
-    scartarlo.
+    Summarize this conversation in at most {max_words} words, keeping only
+    the important facts (promises, gifts, notable events, favors owed). If a
+    previous summary is provided, merge the new facts into it instead of
+    discarding it.
   # Hard safety cap per (npc, player) pair on npc_dialog_history, in case
   # compression ever fails to keep up. Enforced by the periodic cleanup job.
   max-raw-messages-safety: 90
@@ -79,6 +79,46 @@ conversation:
   village-events-limit: 5
   # How many npc_knowledge rows to inject per prompt.
   knowledge-limit: 20
+
+# Pools used to randomly generate a starter character sheet the FIRST time a
+# player ever talks to a given NPC (see RandomProfileGenerator). One entry is
+# picked independently from each list. Village and per-NPC model are never
+# randomized - see the README "What's new in 1.03" section for why. Edit
+# these freely, or use /okotunpc profile to override any single NPC afterwards.
+npc-defaults:
+  roles:
+    - "Villager"
+    - "Guard"
+    - "Wanderer"
+    - "Merchant"
+    - "Elder"
+  personalities:
+    - "Friendly but a bit shy."
+    - "Gruff on the outside, kind underneath."
+    - "Cheerful and talkative."
+    - "Cautious around strangers."
+    - "Calm and thoughtful."
+    - "Blunt and impatient, but fair."
+  backgrounds:
+    - "Has lived in this village their whole life."
+    - "Arrived here a few years ago and doesn't talk much about the past."
+    - "Grew up traveling between settlements before settling down here."
+    - "Comes from a long line of villagers who helped build this place."
+    - "Used to have a very different life before ending up here."
+  professions:
+    - "Farmer"
+    - "Blacksmith"
+    - "Innkeeper"
+    - "Guard"
+    - "Merchant"
+    - "Fisherman"
+    - "Carpenter"
+  speech-styles:
+    - "Speaks slowly and deliberately."
+    - "Talks fast and often trails off mid-sentence."
+    - "Uses simple, plain language."
+    - "Has a habit of asking questions back."
+    - "Peppers sentences with old sayings."
 
 relationship:
   min: -100
@@ -100,6 +140,14 @@ rate-limit:
 fallback:
   enabled: true
   messages:
-    - "*L'NPC annuisce, distratto, e non sembra capire bene cosa dici.*"
-    - "*L'NPC e' impegnato e ti risponde a monosillabi.*"
-    - "*L'NPC ti guarda in silenzio per un momento, poi cambia discorso.*"
+    - "*The NPC nods absentmindedly and doesn't seem to follow what you're saying.*"
+    - "*The NPC is busy and only grunts in reply.*"
+    - "*The NPC stares at you in silence for a moment, then changes the subject.*"
+
+debug:
+  # When true, logs the full request sent to Ollama (model, system prompt,
+  # message history) and the raw response received, to the server console at
+  # INFO level, prefixed "[Ollama DEBUG]". Useful to check exactly what the
+  # NPC "sees" and says, but very noisy and may log conversation content to
+  # the console/log files - leave off in normal production use.
+  log-ollama-communication: false

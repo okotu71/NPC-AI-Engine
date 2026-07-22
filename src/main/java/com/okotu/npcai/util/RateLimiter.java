@@ -4,8 +4,8 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Cooldown semplice per-player. Non persistito: si resetta ad ogni riavvio, va bene
- * perche' serve solo ad evitare spam nella stessa sessione di gioco.
+ * Simple per-player cooldown. Not persisted: resets on every restart, which is fine
+ * since it only needs to prevent spam within the current play session.
  */
 public class RateLimiter {
 
@@ -17,8 +17,8 @@ public class RateLimiter {
     }
 
     /**
-     * @return true se il player puo' inviare una nuova richiesta ora (e ne registra il timestamp),
-     *         false se e' ancora in cooldown.
+     * @return true if the player can send a new request now (and records the timestamp),
+     *         false if they're still on cooldown.
      */
     public boolean tryAcquire(UUID playerUuid) {
         long now = System.currentTimeMillis();

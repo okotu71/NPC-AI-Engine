@@ -19,18 +19,18 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
 
 /**
- * Bridge tra Citizens e il motore di conversazione:
- * 1) click destro su un NPC "abilitato" -> il player entra in modalita' "in conversazione con NPC X";
- * 2) il suo prossimo messaggio in chat viene intercettato (non broadcastato) e inviato al motore AI;
- * 3) la risposta arriva al player come messaggio dell'NPC.
+ * Bridge between Citizens and the conversation engine:
+ * 1) right-click on an NPC -> the player enters "talking to NPC X" mode;
+ * 2) their next chat message is intercepted (not broadcast) and sent to the AI engine;
+ * 3) the reply reaches the player as a message from the NPC.
  *
- * Nota: usa la classica AsyncPlayerChatEvent per compatibilita' Spigot/Paper piu' ampia.
- * Su Paper recenti puoi migrare a io.papermc.paper.event.player.AsyncChatEvent (basata su
- * Adventure Component) se vuoi supportare formattazione ricca nei messaggi.
+ * Note: uses the classic AsyncPlayerChatEvent for broader Spigot/Paper compatibility.
+ * On recent Paper you can migrate to io.papermc.paper.event.player.AsyncChatEvent
+ * (based on Adventure Component) if you want rich message formatting.
  */
 public class NpcBridgeListener implements Listener {
 
-    /** Quanto resta "attiva" la conversazione dopo il click, se il player non scrive nulla. */
+    /** How long the conversation stays "active" after the click if the player writes nothing. */
     private static final long CONVERSATION_TIMEOUT_MS = 30_000;
 
     private final Plugin plugin;
@@ -55,7 +55,7 @@ public class NpcBridgeListener implements Listener {
                 npc.getId(), npc.getName(), System.currentTimeMillis()));
 
         player.sendMessage(ChatColor.GRAY + "[" + npc.getName() + ChatColor.GRAY
-                + "] Scrivi in chat per parlargli. La conversazione scade dopo 30s di inattivita'.");
+                + "] Type in chat to talk to them. The conversation expires after 30s of inactivity.");
     }
 
     @EventHandler(priority = EventPriority.LOW)
@@ -78,7 +78,7 @@ public class NpcBridgeListener implements Listener {
         if (!rateLimiter.tryAcquire(player.getUniqueId())) {
             long remaining = rateLimiter.remainingCooldownMs(player.getUniqueId());
             Bukkit.getScheduler().runTask(plugin, () -> player.sendMessage(
-                    ChatColor.RED + "Aspetta ancora " + (remaining / 1000.0) + "s prima di riparlare con un NPC."));
+                    ChatColor.RED + "Wait " + (remaining / 1000.0) + "s before talking to an NPC again."));
             return;
         }
 
@@ -93,8 +93,8 @@ public class NpcBridgeListener implements Listener {
                     }
                     if (throwable != null) {
                         plugin.getLogger().log(Level.WARNING,
-                                "Errore imprevisto nel flusso di conversazione NPC " + npcId, throwable);
-                        player.sendMessage(ChatColor.RED + "L'NPC non riesce a risponderti ora.");
+                                "Unexpected error in the conversation flow for NPC " + npcId, throwable);
+                        player.sendMessage(ChatColor.RED + "The NPC can't answer you right now.");
                         return;
                     }
                     player.sendMessage(ChatColor.GOLD + "[" + npcName + ChatColor.GOLD + "] "

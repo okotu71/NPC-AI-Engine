@@ -18,11 +18,11 @@ import java.util.stream.Collectors;
  * state, and the last few raw messages. Aims to stay in the 300-500 token
  * range described in the design doc, small enough for a 1B-1.5B model.
  *
- * Sections mirror the design spec: SYSTEM / MEMORIA / CONOSCENZA / CONTESTO.
- * The final "ULTIMI MESSAGGI" section is NOT included in the system prompt -
- * it's passed separately to OllamaClient as chat history, since that maps
- * more naturally onto Ollama's /api/chat message list than being flattened
- * into the system message text.
+ * Sections: SYSTEM / MEMORY / KNOWLEDGE / CONTEXT. The final "RECENT
+ * MESSAGES" part is NOT included in the system prompt text - it's passed
+ * separately to OllamaClient as chat history, since that maps more
+ * naturally onto Ollama's /api/chat message list than being flattened into
+ * the system message text.
  */
 public class PromptBuilder {
 
@@ -42,21 +42,21 @@ public class PromptBuilder {
 
         sb.append("SYSTEM\n").append(buildCharacterSection(profile)).append('\n');
 
-        String memoriaSection = buildMemoriaSection(memory);
-        if (!memoriaSection.isBlank()) {
-            sb.append(SEPARATOR).append("\nMEMORIA\n").append(memoriaSection).append('\n');
+        String memorySection = buildMemorySection(memory);
+        if (!memorySection.isBlank()) {
+            sb.append(SEPARATOR).append("\nMEMORY\n").append(memorySection).append('\n');
         }
 
-        String conoscenzaSection = buildConoscenzaSection(knowledge);
-        if (!conoscenzaSection.isBlank()) {
-            sb.append(SEPARATOR).append("\nCONOSCENZA\n").append(conoscenzaSection).append('\n');
-            sb.append("Parla solo di cio' che conosci. Se ti chiedono di un argomento che non hai "
-                    + "in questa lista, ammetti di non saperne nulla invece di inventare dettagli.\n");
+        String knowledgeSection = buildKnowledgeSection(knowledge);
+        if (!knowledgeSection.isBlank()) {
+            sb.append(SEPARATOR).append("\nKNOWLEDGE\n").append(knowledgeSection).append('\n');
+            sb.append("Only talk about what you know. If asked about a topic that isn't in this "
+                    + "list, admit you don't know instead of making up details.\n");
         }
 
-        String contestoSection = buildContestoSection(villageEvents, state);
-        if (!contestoSection.isBlank()) {
-            sb.append(SEPARATOR).append("\nCONTESTO\n").append(contestoSection);
+        String contextSection = buildContextSection(villageEvents, state);
+        if (!contextSection.isBlank()) {
+            sb.append(SEPARATOR).append("\nCONTEXT\n").append(contextSection);
         }
 
         return sb.toString().stripTrailing();
@@ -81,17 +81,17 @@ public class PromptBuilder {
         }
 
         StringBuilder sb = new StringBuilder();
-        sb.append("Sei ").append(profile.name()).append(".\n");
+        sb.append("You are ").append(profile.name()).append(".\n");
         if (notBlank(profile.profession())) {
             sb.append(profile.profession()).append(".\n");
         } else if (notBlank(profile.role())) {
             sb.append(profile.role()).append(".\n");
         }
         if (notBlank(profile.village())) {
-            sb.append("Abiti nel villaggio ").append(profile.village()).append(".\n");
+            sb.append("You live in the village of ").append(profile.village()).append(".\n");
         }
         if (notBlank(profile.personality())) {
-            sb.append("Carattere: ").append(profile.personality()).append("\n");
+            sb.append("Personality: ").append(profile.personality()).append("\n");
         }
         if (notBlank(profile.background())) {
             sb.append("Background: ").append(profile.background()).append("\n");
@@ -102,36 +102,36 @@ public class PromptBuilder {
         if (notBlank(profile.knowledge())) {
             sb.append(profile.knowledge()).append("\n");
         }
-        sb.append("Resta sempre nel personaggio. Rispondi in italiano, in modo breve "
-                + "(massimo 2-3 frasi), adatto a una chat di gioco.");
+        sb.append("Always stay in character. Answer in English, briefly "
+                + "(2-3 sentences max), in a way that suits a game chat.");
         return sb.toString();
     }
 
     // ---------------------------------------------------------------
-    // MEMORIA: what this NPC remembers about this specific player
+    // MEMORY: what this NPC remembers about this specific player
     // ---------------------------------------------------------------
-    private String buildMemoriaSection(PlayerMemory memory) {
+    private String buildMemorySection(PlayerMemory memory) {
         if (memory == null) {
             return "";
         }
         StringBuilder sb = new StringBuilder();
-        String playerLabel = notBlank(memory.knownName()) ? memory.knownName() : "questo giocatore";
-        sb.append("Conosci ").append(playerLabel).append(".\n");
-        sb.append("Nei suoi confronti: ").append(relationshipService.describe(memory.relationshipScore()))
-                .append(" (punteggio ").append(memory.relationshipScore()).append("/100).\n");
+        String playerLabel = notBlank(memory.knownName()) ? memory.knownName() : "this player";
+        sb.append("You know ").append(playerLabel).append(".\n");
+        sb.append("How you feel about them: ").append(relationshipService.describe(memory.relationshipScore()))
+                .append(" (score ").append(memory.relationshipScore()).append("/100).\n");
         if (notBlank(memory.summary())) {
             sb.append(memory.summary().strip()).append("\n");
         }
         if (notBlank(memory.notes())) {
-            sb.append("Note: ").append(memory.notes().strip()).append("\n");
+            sb.append("Notes: ").append(memory.notes().strip()).append("\n");
         }
         return sb.toString();
     }
 
     // ---------------------------------------------------------------
-    // CONOSCENZA: what this NPC knows (and, implicitly, doesn't know)
+    // KNOWLEDGE: what this NPC knows (and, implicitly, doesn't know)
     // ---------------------------------------------------------------
-    private String buildConoscenzaSection(List<KnowledgeEntry> knowledge) {
+    private String buildKnowledgeSection(List<KnowledgeEntry> knowledge) {
         if (knowledge == null || knowledge.isEmpty()) {
             return "";
         }
@@ -143,9 +143,9 @@ public class PromptBuilder {
     }
 
     // ---------------------------------------------------------------
-    // CONTESTO: shared village events + current emotional state
+    // CONTEXT: shared village events + current emotional state
     // ---------------------------------------------------------------
-    private String buildContestoSection(List<VillageEvent> villageEvents, NpcState state) {
+    private String buildContextSection(List<VillageEvent> villageEvents, NpcState state) {
         StringBuilder sb = new StringBuilder();
         if (villageEvents != null) {
             for (VillageEvent event : villageEvents) {
@@ -164,12 +164,12 @@ public class PromptBuilder {
             return "";
         }
         StringBuilder sb = new StringBuilder();
-        if (state.fatigue() >= 60) sb.append("Oggi sei stanco.\n");
-        if (state.hunger() >= 60) sb.append("Hai fame.\n");
-        if (state.fear() >= 60) sb.append("Sei spaventato.\n");
-        if (state.anger() >= 60) sb.append("Sei arrabbiato.\n");
-        if (state.happiness() >= 80) sb.append("Sei di ottimo umore.\n");
-        else if (state.happiness() <= 20) sb.append("Sei di pessimo umore.\n");
+        if (state.fatigue() >= 60) sb.append("You're tired today.\n");
+        if (state.hunger() >= 60) sb.append("You're hungry.\n");
+        if (state.fear() >= 60) sb.append("You're scared.\n");
+        if (state.anger() >= 60) sb.append("You're angry.\n");
+        if (state.happiness() >= 80) sb.append("You're in a great mood.\n");
+        else if (state.happiness() <= 20) sb.append("You're in a bad mood.\n");
         return sb.toString();
     }
 

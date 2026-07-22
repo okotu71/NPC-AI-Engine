@@ -70,6 +70,16 @@ public class PluginConfig {
     public final boolean fallbackEnabled;
     public final List<String> fallbackMessages;
 
+    // --- randomized starter profile pools (npc-defaults) ---
+    public final List<String> npcDefaultRoles;
+    public final List<String> npcDefaultPersonalities;
+    public final List<String> npcDefaultBackgrounds;
+    public final List<String> npcDefaultProfessions;
+    public final List<String> npcDefaultSpeechStyles;
+
+    // --- debug ---
+    public final boolean debugLogOllamaCommunication;
+
     public PluginConfig(Plugin plugin) {
         FileConfiguration cfg = plugin.getConfig();
         Logger logger = plugin.getLogger();
@@ -116,7 +126,7 @@ public class PluginConfig {
         this.summaryTriggerMessages = cfg.getInt("conversation.summary-trigger-messages", 30);
         this.summaryMaxWords = cfg.getInt("conversation.summary-max-words", 200);
         this.summaryPromptTemplate = cfg.getString("conversation.summary-prompt",
-                "Riassumi questa conversazione in massimo {max_words} parole mantenendo solo i fatti importanti.");
+                "Summarize this conversation in at most {max_words} words, keeping only the important facts.");
         this.maxRawMessagesSafety = cfg.getInt("conversation.max-raw-messages-safety", 90);
         this.cleanupIntervalMinutes = cfg.getLong("conversation.cleanup-interval-minutes", 10);
         this.cacheMaxEntries = cfg.getLong("conversation.cache-max-entries", 5000);
@@ -133,6 +143,14 @@ public class PluginConfig {
 
         this.fallbackEnabled = cfg.getBoolean("fallback.enabled", true);
         this.fallbackMessages = cfg.getStringList("fallback.messages");
+
+        this.npcDefaultRoles = cfg.getStringList("npc-defaults.roles");
+        this.npcDefaultPersonalities = cfg.getStringList("npc-defaults.personalities");
+        this.npcDefaultBackgrounds = cfg.getStringList("npc-defaults.backgrounds");
+        this.npcDefaultProfessions = cfg.getStringList("npc-defaults.professions");
+        this.npcDefaultSpeechStyles = cfg.getStringList("npc-defaults.speech-styles");
+
+        this.debugLogOllamaCommunication = cfg.getBoolean("debug.log-ollama-communication", false);
     }
 
     private static String getFromProfile(ConfigurationSection section, String key, String fallback) {

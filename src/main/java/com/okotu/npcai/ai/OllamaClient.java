@@ -18,8 +18,8 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * Client per l'endpoint /api/chat di Ollama. Tutte le chiamate sono async
- * (java.net.http.HttpClient + CompletableFuture): non bloccano mai il main thread.
+ * Client for Ollama's /api/chat endpoint. All calls are async
+ * (java.net.http.HttpClient + CompletableFuture): they never block the main thread.
  */
 public class OllamaClient {
 
@@ -37,13 +37,13 @@ public class OllamaClient {
     }
 
     /**
-     * Un turno di chat: [system prompt] + [cronologia] + [messaggio utente corrente].
+     * One chat turn: [system prompt] + [history] + [current user message].
      *
-     * @param model        tag del modello Ollama da usare (es. "qwen2.5:1.5b")
-     * @param systemPrompt system prompt gia' costruito (backstory + personalita')
-     * @param messages     cronologia gia' formattata come coppie role/content (senza il system prompt)
-     * @param userMessage  ultimo messaggio del player
-     * @return testo della risposta dell'NPC
+     * @param model        Ollama model tag to use (e.g. "qwen2.5:1.5b")
+     * @param systemPrompt already-built system prompt (character sheet + memory + knowledge + context)
+     * @param messages     history already formatted as role/content pairs (without the system prompt)
+     * @param userMessage  the player's latest message
+     * @return the NPC's reply text
      */
     public CompletableFuture<String> chat(String model, String systemPrompt,
                                            List<ChatMessage> messages, String userMessage) {
@@ -61,8 +61,8 @@ public class OllamaClient {
                 failed.completeExceptionally(throwable);
                 return failed;
             }
-            logger.log(Level.WARNING, "Richiesta a Ollama fallita, ritento ("
-                    + retriesLeft + " tentativi rimasti): " + throwable.getMessage());
+            logger.log(Level.WARNING, "Request to Ollama failed, retrying ("
+                    + retriesLeft + " attempts left): " + throwable.getMessage());
             CompletableFuture<String> delayed = new CompletableFuture<>();
             CompletableFuture.delayedExecutor(config.ollamaRetryDelayMs, java.util.concurrent.TimeUnit.MILLISECONDS)
                     .execute(() -> attemptWithRetries(body, retriesLeft - 1)
@@ -75,8 +75,14 @@ public class OllamaClient {
     }
 
     private CompletableFuture<String> sendRequest(JsonObject body) {
+        String url = config.ollamaBaseUrl + "/api/chat";
+
+        if (config.debugLogOllamaCommunication) {
+            logger.info("[Ollama DEBUG] Request -> " + url + "\n" + body);
+        }
+
         HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(config.ollamaBaseUrl + "/api/chat"))
+                .uri(URI.create(url))
                 .timeout(Duration.ofMillis(config.ollamaTimeoutMs))
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(body.toString()))
@@ -84,9 +90,13 @@ public class OllamaClient {
 
         return httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString())
                 .thenApply(response -> {
+                    if (config.debugLogOllamaCommunication) {
+                        logger.info("[Ollama DEBUG] Response (HTTP " + response.statusCode() + ") <- "
+                                + url + "\n" + response.body());
+                    }
                     if (response.statusCode() / 100 != 2) {
                         throw new CompletionException(
-                                new RuntimeException("Ollama ha risposto HTTP " + response.statusCode()
+                                new RuntimeException("Ollama responded with HTTP " + response.statusCode()
                                         + ": " + truncate(response.body(), 300)));
                     }
                     return extractContent(response.body());
@@ -121,7 +131,7 @@ public class OllamaClient {
         JsonObject root = JsonParser.parseString(responseBody).getAsJsonObject();
         JsonObject message = root.getAsJsonObject("message");
         if (message == null || !message.has("content")) {
-            throw new CompletionException(new RuntimeException("Risposta Ollama senza campo message.content"));
+            throw new CompletionException(new RuntimeException("Ollama response is missing message.content"));
         }
         return message.get("content").getAsString().trim();
     }
@@ -131,7 +141,7 @@ public class OllamaClient {
         return s.length() <= max ? s : s.substring(0, max) + "...";
     }
 
-    /** Coppia role/content per la cronologia passata a /api/chat. */
+    /** Role/content pair for the history passed to /api/chat. */
     public record ChatMessage(String role, String content) {
         public static ChatMessage user(String content) {
             return new ChatMessage("user", content);

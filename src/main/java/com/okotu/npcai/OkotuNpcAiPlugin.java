@@ -17,6 +17,7 @@ import com.okotu.npcai.db.PlayerMemoryDao;
 import com.okotu.npcai.db.VillageEventDao;
 import com.okotu.npcai.npc.NpcBridgeListener;
 import com.okotu.npcai.service.ConversationService;
+import com.okotu.npcai.service.RandomProfileGenerator;
 import com.okotu.npcai.service.RelationshipService;
 import com.okotu.npcai.service.SummaryService;
 import com.okotu.npcai.util.RateLimiter;
@@ -45,6 +46,7 @@ public class OkotuNpcAiPlugin extends JavaPlugin {
     private OllamaClient ollamaClient;
     private RelationshipService relationshipService;
     private SummaryService summaryService;
+    private RandomProfileGenerator randomProfileGenerator;
     private ConversationService conversationService;
 
     private ExecutorService asyncExecutor;
@@ -123,11 +125,12 @@ public class OkotuNpcAiPlugin extends JavaPlugin {
         this.relationshipService = new RelationshipService(playerMemoryDao, pluginConfig);
         this.summaryService = new SummaryService(pluginConfig, playerMemoryDao, dialogHistoryDao,
                 recentMessageCache, ollamaClient, asyncExecutor, getLogger());
+        this.randomProfileGenerator = new RandomProfileGenerator(pluginConfig);
 
         PromptBuilder promptBuilder = new PromptBuilder(relationshipService);
         this.conversationService = new ConversationService(pluginConfig, npcProfileDao, playerMemoryDao,
                 knowledgeDao, villageEventDao, npcStateDao, recentMessageCache, ollamaClient, promptBuilder,
-                summaryService, asyncExecutor, getLogger());
+                summaryService, randomProfileGenerator, asyncExecutor, getLogger());
     }
 
     private void registerApi() {
@@ -147,10 +150,11 @@ public class OkotuNpcAiPlugin extends JavaPlugin {
         this.relationshipService = new RelationshipService(playerMemoryDao, pluginConfig);
         this.summaryService = new SummaryService(pluginConfig, playerMemoryDao, dialogHistoryDao,
                 recentMessageCache, ollamaClient, asyncExecutor, getLogger());
+        this.randomProfileGenerator = new RandomProfileGenerator(pluginConfig);
         PromptBuilder promptBuilder = new PromptBuilder(relationshipService);
         this.conversationService = new ConversationService(pluginConfig, npcProfileDao, playerMemoryDao,
                 knowledgeDao, villageEventDao, npcStateDao, recentMessageCache, ollamaClient, promptBuilder,
-                summaryService, asyncExecutor, getLogger());
+                summaryService, randomProfileGenerator, asyncExecutor, getLogger());
         getLogger().info("Configuration reloaded (profile: " + pluginConfig.activeProfile + ").");
     }
 

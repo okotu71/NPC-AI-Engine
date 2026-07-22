@@ -39,11 +39,21 @@ public class NpcProfileDao {
 
     /** Returns the existing profile, or creates it with default values and returns it. */
     public NpcProfile findOrCreate(int npcId, String fallbackName) throws SQLException {
+        return findOrCreate(npcId, () -> NpcProfile.defaultFor(npcId, fallbackName));
+    }
+
+    /**
+     * Returns the existing profile, or creates it using whatever
+     * {@code defaultSupplier} produces (e.g. RandomProfileGenerator on first
+     * conversation, or NpcProfile.defaultFor for a plain fallback) and
+     * returns it.
+     */
+    public NpcProfile findOrCreate(int npcId, java.util.function.Supplier<NpcProfile> defaultSupplier) throws SQLException {
         Optional<NpcProfile> existing = find(npcId);
         if (existing.isPresent()) {
             return existing.get();
         }
-        NpcProfile fresh = NpcProfile.defaultFor(npcId, fallbackName);
+        NpcProfile fresh = defaultSupplier.get();
         insert(fresh);
         return fresh;
     }

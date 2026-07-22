@@ -3,7 +3,7 @@ package com.okotu.npcai.model;
 import java.time.Instant;
 
 /**
- * Una singola battuta di dialogo, di un player o dell'NPC.
+ * A single line of dialogue, from either a player or the NPC.
  */
 public record ConversationEntry(Role role, String message, Instant timestamp) {
 
@@ -27,7 +27,7 @@ public record ConversationEntry(Role role, String message, Instant timestamp) {
                     return r;
                 }
             }
-            throw new IllegalArgumentException("Ruolo sconosciuto: " + value);
+            throw new IllegalArgumentException("Unknown role: " + value);
         }
     }
 

@@ -81,9 +81,9 @@ public class SummaryService {
 
         StringBuilder userMessage = new StringBuilder();
         if (previousSummary != null && !previousSummary.isBlank()) {
-            userMessage.append("Riassunto precedente:\n").append(previousSummary).append("\n\n");
+            userMessage.append("Previous summary:\n").append(previousSummary).append("\n\n");
         }
-        userMessage.append("Nuova conversazione da integrare:\n").append(transcript);
+        userMessage.append("New conversation to integrate:\n").append(transcript);
 
         String newSummary = ollamaClient
                 .chat(config.ollamaSummaryModel, systemPrompt, List.of(), userMessage.toString())

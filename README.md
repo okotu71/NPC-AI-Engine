@@ -22,11 +22,53 @@ in that sandbox). Before going to production:
 
 The jar filename always embeds the Maven version (`<finalName>` in `pom.xml`
 uses `${project.artifactId}-${project.version}`), e.g.
-`okotu-npc-ai-engine-1.02.jar`. `plugin.yml`'s `version:` field is filled in
+`okotu-npc-ai-engine-1.03.jar`. `plugin.yml`'s `version:` field is filled in
 automatically at build time from the same value, so **the only place you
 need to bump the version for a new release is `pom.xml`**.
 
-## What's new in 1.02
+## What's new in 1.03
+
+- **Full English translation.** Every player-facing and NPC-facing string is
+  now in English: the prompt sections (`SYSTEM`/`MEMORY`/`KNOWLEDGE`/`CONTEXT`),
+  the auto-built character sheet text, fallback messages, chat-capture
+  messages, relationship descriptors, the memory-compression instruction sent
+  to Ollama, error messages, log lines. **This includes the instruction that
+  tells the NPC what language to answer in** - it used to say "answer in
+  Italian", it now says "answer in English", so out of the box NPCs will now
+  reply in English instead of Italian. If your playerbase is Italian-speaking
+  and you only wanted the *code/config* in English, edit the one line in
+  `PromptBuilder.buildCharacterSection()` (`"Answer in English, briefly..."`)
+  back to Italian, or better, make it a `config.yml` setting - happy to wire
+  that up if you'd rather it be configurable than hardcoded either way.
+- **Randomized starter profiles.** The first time a player ever talks to a
+  given NPC, `RandomProfileGenerator` now picks a role/personality/
+  background/profession/speech-style independently at random from the pools
+  under `npc-defaults` in `config.yml`, instead of every new NPC getting the
+  exact same placeholder text (see "About the old default text" below).
+  Village and per-NPC model are deliberately never randomized - see the
+  comment in `RandomProfileGenerator`.
+- **Default model reconfirmed as `qwen2.5:1.5b`** in both `config.yml`
+  (`ollama.default-model`) and the built-in fallback in `PluginConfig` used
+  if that key is ever missing from config.yml.
+- **Ollama communication debug logging.** New `debug.log-ollama-communication`
+  in `config.yml` (off by default). When `true`, `OllamaClient` logs the full
+  JSON request sent to Ollama and the raw response received, to the server
+  console at INFO level, prefixed `[Ollama DEBUG]`. Very useful while tuning
+  prompts/personalities, but noisy and logs conversation content - leave it
+  off in normal production use.
+
+### About the old default text ("Neutral, curious about newcomers...")
+
+You asked where that came from: it's `NpcProfile.defaultFor()`, a hardcoded
+fallback in the Java code (`model/NpcProfile.java`) - every NPC that didn't
+have a row in `npc_profiles` yet fell back to that exact same static text
+when a conversation started, which is why every new NPC looked identical.
+That method still exists (now translated to English) but as of 1.03 it's
+only used as a last-resort fallback if the database is unreachable when a
+conversation starts - the actual first-conversation path now goes through
+`RandomProfileGenerator` instead, described above.
+
+## What was new in 1.02
 
 A full memory redesign, replacing 1.01's single `npc_character` /
 `npc_conversation_log` pair with six tables:
@@ -208,7 +250,7 @@ thread.
 ## Troubleshooting
 
 - **Plugin doesn't load / `plugin.yml` seems missing from the jar**: run
-  `unzip -l target/okotu-npc-ai-engine-1.02.jar | grep plugin.yml` after
+  `unzip -l target/okotu-npc-ai-engine-1.03.jar | grep plugin.yml` after
   building. A stale `target/` from a partial build can cause this - try
   `mvn clean package` from scratch.
 - **MySQL connection errors on startup**: check `active-profile` matches a

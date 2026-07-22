@@ -43,6 +43,7 @@ public class ConversationService {
     private final OllamaClient ollamaClient;
     private final PromptBuilder promptBuilder;
     private final SummaryService summaryService;
+    private final RandomProfileGenerator randomProfileGenerator;
     private final Executor asyncExecutor;
     private final Logger logger;
     private final Random random = new Random();
@@ -51,6 +52,7 @@ public class ConversationService {
                                 KnowledgeDao knowledgeDao, VillageEventDao villageEventDao, NpcStateDao npcStateDao,
                                 RecentMessageCache recentMessageCache, OllamaClient ollamaClient,
                                 PromptBuilder promptBuilder, SummaryService summaryService,
+                                RandomProfileGenerator randomProfileGenerator,
                                 Executor asyncExecutor, Logger logger) {
         this.config = config;
         this.npcProfileDao = npcProfileDao;
@@ -62,6 +64,7 @@ public class ConversationService {
         this.ollamaClient = ollamaClient;
         this.promptBuilder = promptBuilder;
         this.summaryService = summaryService;
+        this.randomProfileGenerator = randomProfileGenerator;
         this.asyncExecutor = asyncExecutor;
         this.logger = logger;
     }
@@ -96,7 +99,7 @@ public class ConversationService {
 
     private Context loadContext(int npcId, String fallbackName, UUID playerUuid) {
         try {
-            NpcProfile profile = npcProfileDao.findOrCreate(npcId, fallbackName);
+            NpcProfile profile = npcProfileDao.findOrCreate(npcId, () -> randomProfileGenerator.generate(npcId, fallbackName));
             PlayerMemory memory = playerMemoryDao.findOrCreate(npcId, playerUuid);
             List<KnowledgeEntry> knowledge = knowledgeDao.findForNpc(npcId, config.knowledgeLimit);
             List<VillageEvent> villageEvents = profile.village() != null
@@ -139,7 +142,7 @@ public class ConversationService {
     private String fallbackMessage() {
         List<String> messages = config.fallbackMessages;
         if (!config.fallbackEnabled || messages.isEmpty()) {
-            return "*L'NPC non risponde.*";
+            return "*The NPC doesn't answer.*";
         }
         return messages.get(random.nextInt(messages.size()));
     }

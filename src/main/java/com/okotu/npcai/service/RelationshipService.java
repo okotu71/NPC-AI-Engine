@@ -41,12 +41,12 @@ public class RelationshipService {
         return adjust(npcId, playerUuid, delta);
     }
 
-    /** Short Italian qualitative description of a relationship score, for use inside prompts. */
+    /** Short qualitative description of a relationship score, for use inside prompts. */
     public String describe(int score) {
-        if (score <= -60) return "ti odia";
-        if (score <= -20) return "e' diffidente verso di te";
-        if (score < 20) return "e' neutrale nei tuoi confronti";
-        if (score < 60) return "ti considera amichevole";
-        return "ti considera un caro amico";
+        if (score <= -60) return "hates you";
+        if (score <= -20) return "is wary of you";
+        if (score < 20) return "is neutral towards you";
+        if (score < 60) return "considers you friendly";
+        return "considers you a close friend";
     }
 }
