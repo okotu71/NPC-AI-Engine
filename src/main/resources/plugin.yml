@@ -10,7 +10,7 @@ depend: [Citizens]
 commands:
   okotunpc:
     description: Admin commands for okotu-npc-ai-engine
-    usage: /okotunpc <reload|setmodel|setbackstory|info>
+    usage: /okotunpc <reload|profile|knowledge|event|relationship|state|info>
     permission: okotu.npcai.admin
 
 permissions:

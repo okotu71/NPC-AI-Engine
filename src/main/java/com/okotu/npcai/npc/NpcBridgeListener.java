@@ -86,7 +86,7 @@ public class NpcBridgeListener implements Listener {
         int npcId = active.npcId();
         String npcName = active.npcName();
 
-        conversationService.handlePlayerMessage(npcId, npcName, player.getUniqueId(), message)
+        conversationService.handlePlayerMessage(npcId, npcName, player.getName(), player.getUniqueId(), message)
                 .whenComplete((reply, throwable) -> Bukkit.getScheduler().runTask(plugin, () -> {
                     if (!player.isOnline()) {
                         return;

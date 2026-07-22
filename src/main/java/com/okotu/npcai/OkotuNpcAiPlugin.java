@@ -1,17 +1,27 @@
 package com.okotu.npcai;
 
 import com.okotu.npcai.ai.OllamaClient;
-import com.okotu.npcai.cache.ConversationCache;
+import com.okotu.npcai.ai.PromptBuilder;
+import com.okotu.npcai.api.OkotuNpcApi;
+import com.okotu.npcai.api.OkotuNpcApiImpl;
+import com.okotu.npcai.cache.RecentMessageCache;
 import com.okotu.npcai.command.OkotuCommand;
 import com.okotu.npcai.config.PluginConfig;
-import com.okotu.npcai.db.CharacterDao;
 import com.okotu.npcai.db.CleanupTask;
-import com.okotu.npcai.db.ConversationDao;
 import com.okotu.npcai.db.Database;
+import com.okotu.npcai.db.DialogHistoryDao;
+import com.okotu.npcai.db.KnowledgeDao;
+import com.okotu.npcai.db.NpcProfileDao;
+import com.okotu.npcai.db.NpcStateDao;
+import com.okotu.npcai.db.PlayerMemoryDao;
+import com.okotu.npcai.db.VillageEventDao;
 import com.okotu.npcai.npc.NpcBridgeListener;
 import com.okotu.npcai.service.ConversationService;
+import com.okotu.npcai.service.RelationshipService;
+import com.okotu.npcai.service.SummaryService;
 import com.okotu.npcai.util.RateLimiter;
 import org.bukkit.Bukkit;
+import org.bukkit.plugin.ServicePriority;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.io.File;
@@ -23,12 +33,22 @@ public class OkotuNpcAiPlugin extends JavaPlugin {
 
     private PluginConfig pluginConfig;
     private Database database;
-    private CharacterDao characterDao;
-    private ConversationDao conversationDao;
-    private ConversationCache conversationCache;
+
+    private NpcProfileDao npcProfileDao;
+    private PlayerMemoryDao playerMemoryDao;
+    private DialogHistoryDao dialogHistoryDao;
+    private VillageEventDao villageEventDao;
+    private KnowledgeDao knowledgeDao;
+    private NpcStateDao npcStateDao;
+
+    private RecentMessageCache recentMessageCache;
     private OllamaClient ollamaClient;
+    private RelationshipService relationshipService;
+    private SummaryService summaryService;
     private ConversationService conversationService;
+
     private ExecutorService asyncExecutor;
+    private OkotuNpcApiImpl apiImpl;
 
     @Override
     public void onEnable() {
@@ -40,7 +60,6 @@ public class OkotuNpcAiPlugin extends JavaPlugin {
 
         ensureDefaultConfigExists();
 
-        // Dedicated executor for DB + HTTP work: never use the server main thread for these
         this.asyncExecutor = Executors.newFixedThreadPool(4, r -> {
             Thread t = new Thread(r, "okotu-npc-ai-worker");
             t.setDaemon(true);
@@ -48,6 +67,7 @@ public class OkotuNpcAiPlugin extends JavaPlugin {
         });
 
         initializeComponents();
+        registerApi();
 
         getServer().getPluginManager().registerEvents(
                 new NpcBridgeListener(this, conversationService, new RateLimiter(pluginConfig.perPlayerCooldownMs)),
@@ -60,7 +80,7 @@ public class OkotuNpcAiPlugin extends JavaPlugin {
 
         long intervalTicks = pluginConfig.cleanupIntervalMinutes * 60L * 20L; // minutes -> ticks (20 ticks/s)
         Bukkit.getScheduler().runTaskTimerAsynchronously(this,
-                new CleanupTask(this, conversationDao, pluginConfig.historySize),
+                new CleanupTask(this, dialogHistoryDao, villageEventDao, pluginConfig.maxRawMessagesSafety),
                 intervalTicks, intervalTicks);
 
         getLogger().info("okotu-npc-ai-engine v" + getDescription().getVersion() + " started."
@@ -72,13 +92,9 @@ public class OkotuNpcAiPlugin extends JavaPlugin {
     }
 
     /**
-     * Makes sure plugins/OkotuNpcAiEngine/config.yml exists, creating it from the
-     * bundled default (src/main/resources/config.yml) on first run. plugin.yml
-     * itself is a build-time manifest packaged inside the jar (Bukkit needs it
-     * to even load the plugin), so it cannot be "created" at runtime the same
-     * way config.yml can - if it's ever missing from a built jar, that's a
-     * packaging/build issue (see README "Troubleshooting"), not something this
-     * method can fix from inside the plugin.
+     * Makes sure plugins/OkotuNpcAiEngine/config.yml exists, creating it from
+     * the bundled default on first run. See README "About plugin.yml" for
+     * why plugin.yml itself can't be created this way.
      */
     private void ensureDefaultConfigExists() {
         File configFile = new File(getDataFolder(), "config.yml");
@@ -95,13 +111,28 @@ public class OkotuNpcAiPlugin extends JavaPlugin {
         this.database = new Database(this, pluginConfig);
         this.database.applySchema();
 
-        this.characterDao = new CharacterDao(database);
-        this.conversationDao = new ConversationDao(database);
-        this.conversationCache = new ConversationCache(conversationDao, pluginConfig);
-        this.ollamaClient = new OllamaClient(pluginConfig, getLogger(), asyncExecutor);
+        this.npcProfileDao = new NpcProfileDao(database);
+        this.playerMemoryDao = new PlayerMemoryDao(database, pluginConfig.relationshipDefault);
+        this.dialogHistoryDao = new DialogHistoryDao(database);
+        this.villageEventDao = new VillageEventDao(database);
+        this.knowledgeDao = new KnowledgeDao(database);
+        this.npcStateDao = new NpcStateDao(database);
 
-        this.conversationService = new ConversationService(
-                pluginConfig, characterDao, conversationCache, ollamaClient, asyncExecutor, getLogger());
+        this.recentMessageCache = new RecentMessageCache(dialogHistoryDao, pluginConfig);
+        this.ollamaClient = new OllamaClient(pluginConfig, getLogger(), asyncExecutor);
+        this.relationshipService = new RelationshipService(playerMemoryDao, pluginConfig);
+        this.summaryService = new SummaryService(pluginConfig, playerMemoryDao, dialogHistoryDao,
+                recentMessageCache, ollamaClient, asyncExecutor, getLogger());
+
+        PromptBuilder promptBuilder = new PromptBuilder(relationshipService);
+        this.conversationService = new ConversationService(pluginConfig, npcProfileDao, playerMemoryDao,
+                knowledgeDao, villageEventDao, npcStateDao, recentMessageCache, ollamaClient, promptBuilder,
+                summaryService, asyncExecutor, getLogger());
+    }
+
+    private void registerApi() {
+        this.apiImpl = new OkotuNpcApiImpl(relationshipService, villageEventDao, knowledgeDao, npcStateDao, asyncExecutor);
+        getServer().getServicesManager().register(OkotuNpcApi.class, apiImpl, this, ServicePriority.Normal);
     }
 
     /**
@@ -113,13 +144,20 @@ public class OkotuNpcAiPlugin extends JavaPlugin {
         reloadConfig();
         this.pluginConfig = new PluginConfig(this);
         this.ollamaClient = new OllamaClient(pluginConfig, getLogger(), asyncExecutor);
-        this.conversationService = new ConversationService(
-                pluginConfig, characterDao, conversationCache, ollamaClient, asyncExecutor, getLogger());
+        this.relationshipService = new RelationshipService(playerMemoryDao, pluginConfig);
+        this.summaryService = new SummaryService(pluginConfig, playerMemoryDao, dialogHistoryDao,
+                recentMessageCache, ollamaClient, asyncExecutor, getLogger());
+        PromptBuilder promptBuilder = new PromptBuilder(relationshipService);
+        this.conversationService = new ConversationService(pluginConfig, npcProfileDao, playerMemoryDao,
+                knowledgeDao, villageEventDao, npcStateDao, recentMessageCache, ollamaClient, promptBuilder,
+                summaryService, asyncExecutor, getLogger());
         getLogger().info("Configuration reloaded (profile: " + pluginConfig.activeProfile + ").");
     }
 
     @Override
     public void onDisable() {
+        getServer().getServicesManager().unregisterAll(this);
+
         if (asyncExecutor != null) {
             asyncExecutor.shutdown();
             try {
@@ -137,11 +175,31 @@ public class OkotuNpcAiPlugin extends JavaPlugin {
         getLogger().info("okotu-npc-ai-engine stopped.");
     }
 
-    public CharacterDao getCharacterDao() {
-        return characterDao;
-    }
-
     public PluginConfig getPluginConfig() {
         return pluginConfig;
+    }
+
+    public NpcProfileDao getNpcProfileDao() {
+        return npcProfileDao;
+    }
+
+    public PlayerMemoryDao getPlayerMemoryDao() {
+        return playerMemoryDao;
+    }
+
+    public DialogHistoryDao getDialogHistoryDao() {
+        return dialogHistoryDao;
+    }
+
+    public VillageEventDao getVillageEventDao() {
+        return villageEventDao;
+    }
+
+    public KnowledgeDao getKnowledgeDao() {
+        return knowledgeDao;
+    }
+
+    public NpcStateDao getNpcStateDao() {
+        return npcStateDao;
     }
 }

@@ -1,10 +1,12 @@
 # =========================================================
-# okotu-npc-ai-engine - configuration
+# okotu-npc-ai-engine - configuration (v1.02)
 # =========================================================
 
-# Which MySQL profile to use: "prod" or "test" (see the "prod" / "test" blocks below).
-# Can be overridden without touching this file via a JVM system property when
-# starting the server, which takes precedence over this value:
+# Which profile to use: "prod" or "test" (see the "prod" / "test" blocks
+# below - each one bundles BOTH the MySQL connection AND the Ollama docking
+# address for that environment). Can be overridden without touching this
+# file via a JVM system property when starting the server, which takes
+# precedence over this value:
 #   -Dokotu.profile=test
 active-profile: "prod"
 
@@ -14,9 +16,12 @@ prod:
   mysql-database: "okotu_npc_ai"
   mysql-username: "usr"
   mysql-password: "psw"
-  # Optional prefix prepended to every table name (e.g. "srv1_" -> "srv1_npc_character").
+  # Optional prefix prepended to every table name (e.g. "srv1_" -> "srv1_npc_profiles").
   # Leave empty ("") to use the plain table names shown in schema.sql.
   mysql-table-prefix: ""
+  # Ollama docking used for this profile (address/port of the egg set up earlier).
+  ollama-host: "127.0.0.1"
+  ollama-port: 11434
 
 test:
   mysql-host: "ip_server"
@@ -25,16 +30,21 @@ test:
   mysql-username: "usr"
   mysql-password: "psw"
   mysql-table-prefix: ""
+  # You can point this at a separate test Ollama docking, or reuse the same one.
+  ollama-host: "127.0.0.1"
+  ollama-port: 11434
 
 # Shared connection-pool settings (apply to whichever profile is active).
 mysql-pool-size: 10
 mysql-extra-params: "useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=UTC"
 
 ollama:
-  # Address of the Ollama docking service (the Pterodactyl egg set up earlier).
-  base-url: "http://127.0.0.1:11434"
-  # Default model used if an NPC doesn't have its own override.
+  # Model used for actual NPC dialogue if an NPC doesn't have its own override
+  # (npc_profiles.model).
   default-model: "qwen2.5:1.5b"
+  # Model used for the periodic memory-compression summarization calls.
+  # Leave empty ("") to reuse default-model.
+  summary-model: ""
   # Request timeout, after which the fallback response kicks in.
   timeout-ms: 8000
   # Extra attempts on network error/timeout (0 = no retries).
@@ -42,13 +52,46 @@ ollama:
   retry-delay-ms: 500
 
 conversation:
-  # How many turns (single messages) to keep per (npc, player) pair.
-  history-size: 20
-  # In-RAM cache (Caffeine): avoids hitting MySQL on every single message.
+  # How many of the most recent raw messages to include in the "ULTIMI
+  # MESSAGGI" section of the prompt (independent from the compression trigger below).
+  recent-messages: 20
+  # After this many accumulated raw messages (player+npc) since the last
+  # compression for a given (npc, player) pair, the plugin asks Ollama to
+  # summarize them, merges the result into npc_player_memory.summary, and
+  # deletes the compressed rows from npc_dialog_history.
+  summary-trigger-messages: 30
+  summary-max-words: 200
+  # Instruction sent to Ollama when compressing memory. {max_words} is
+  # replaced with summary-max-words above.
+  summary-prompt: >
+    Riassumi questa conversazione in massimo {max_words} parole, mantenendo
+    solo i fatti importanti (promesse, doni, eventi rilevanti, favori). Se e'
+    presente un riassunto precedente, integralo con i nuovi fatti invece di
+    scartarlo.
+  # Hard safety cap per (npc, player) pair on npc_dialog_history, in case
+  # compression ever fails to keep up. Enforced by the periodic cleanup job.
+  max-raw-messages-safety: 90
+  cleanup-interval-minutes: 10
+  # In-RAM cache (Caffeine) for the "recent messages" read on every prompt build.
   cache-max-entries: 5000
   cache-expire-after-minutes: 30
-  # How often (in minutes) the job that trims MySQL beyond history-size runs.
-  cleanup-interval-minutes: 10
+  # How many active village_events (highest priority first) to inject per prompt.
+  village-events-limit: 5
+  # How many npc_knowledge rows to inject per prompt.
+  knowledge-limit: 20
+
+relationship:
+  min: -100
+  max: 100
+  default: 0
+  # Named deltas usable via the public API (OkotuNpcApi#applyRelationshipAction)
+  # and via "/okotunpc relationship <npcId> <player> action:<key>". Feel free
+  # to add your own keys here and reference them from other plugins/commands.
+  actions:
+    bought-item: 5
+    saved-villager: 15
+    stole: -20
+    killed-villager: -40
 
 rate-limit:
   # Minimum time between two AI requests from the same player, in milliseconds.
@@ -57,18 +100,6 @@ rate-limit:
 fallback:
   enabled: true
   messages:
-    - "*The NPC nods absentmindedly and doesn't seem to follow what you're saying.*"
-    - "*The NPC is busy and only grunts in reply.*"
-    - "*The NPC stares at you in silence for a moment, then changes the subject.*"
-
-# Optional per-NPC configuration (key = Citizens npc_id).
-# Any NPC not listed here falls back to the defaults above and a generic system prompt.
-npcs:
-  default:
-    model: "qwen2.5:1.5b"
-    system-prompt: >
-      You are {name}, a character living in a Minecraft world.
-      Backstory: {backstory}
-      Personality: {personality}
-      Always stay in character, answer in a way consistent with a game chat:
-      short replies (2-3 sentences max).
+    - "*L'NPC annuisce, distratto, e non sembra capire bene cosa dici.*"
+    - "*L'NPC e' impegnato e ti risponde a monosillabi.*"
+    - "*L'NPC ti guarda in silenzio per un momento, poi cambia discorso.*"

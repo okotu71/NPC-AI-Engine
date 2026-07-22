@@ -6,32 +6,47 @@ import java.sql.SQLException;
 import java.util.logging.Level;
 
 /**
- * Run periodically (async) to align MySQL with the configured sliding window:
- * the Caffeine cache already limits what's kept in RAM, but old messages
- * remain in MySQL until this job removes them. Doing it here instead of on
- * every single insert avoids a window-function DELETE on every message.
+ * Run periodically (async):
+ * 1) safety-trims npc_dialog_history in case SummaryService ever falls
+ *    behind (normal operation should rarely delete anything here, since
+ *    compression already clears rows well before this cap);
+ * 2) deletes expired village_events.
  */
 public class CleanupTask implements Runnable {
 
     private final Plugin plugin;
-    private final ConversationDao conversationDao;
-    private final int historySize;
+    private final DialogHistoryDao dialogHistoryDao;
+    private final VillageEventDao villageEventDao;
+    private final int maxRawMessagesSafety;
 
-    public CleanupTask(Plugin plugin, ConversationDao conversationDao, int historySize) {
+    public CleanupTask(Plugin plugin, DialogHistoryDao dialogHistoryDao, VillageEventDao villageEventDao,
+                        int maxRawMessagesSafety) {
         this.plugin = plugin;
-        this.conversationDao = conversationDao;
-        this.historySize = historySize;
+        this.dialogHistoryDao = dialogHistoryDao;
+        this.villageEventDao = villageEventDao;
+        this.maxRawMessagesSafety = maxRawMessagesSafety;
     }
 
     @Override
     public void run() {
         try {
-            int deleted = conversationDao.trimAllHistories(historySize);
-            if (deleted > 0) {
-                plugin.getLogger().fine("Conversation cleanup: removed " + deleted + " rows beyond the window.");
+            int deletedDialog = dialogHistoryDao.trimSafety(maxRawMessagesSafety);
+            if (deletedDialog > 0) {
+                plugin.getLogger().warning("Safety cleanup removed " + deletedDialog + " dialog rows beyond "
+                        + maxRawMessagesSafety + " per (npc, player) pair - memory compression may be falling "
+                        + "behind (check Ollama availability).");
             }
         } catch (SQLException e) {
-            plugin.getLogger().log(Level.WARNING, "Error during periodic conversation cleanup", e);
+            plugin.getLogger().log(Level.WARNING, "Error during periodic dialog history cleanup", e);
+        }
+
+        try {
+            int deletedEvents = villageEventDao.deleteExpired();
+            if (deletedEvents > 0) {
+                plugin.getLogger().fine("Cleanup: removed " + deletedEvents + " expired village events.");
+            }
+        } catch (SQLException e) {
+            plugin.getLogger().log(Level.WARNING, "Error during periodic village events cleanup", e);
         }
     }
 }
