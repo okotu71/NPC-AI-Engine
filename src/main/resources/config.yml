@@ -1,0 +1,56 @@
+# =========================================================
+# okotu-npc-ai-engine - configurazione
+# =========================================================
+
+mysql:
+  host: localhost
+  port: 3306
+  database: okotu_npc
+  username: okotu
+  password: "changeme"
+  pool-size: 10
+  # Parametri aggiuntivi JDBC (utf8mb4 consigliato per nomi/messaggi con emoji o caratteri speciali)
+  extra-params: "useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=UTC"
+
+ollama:
+  # Indirizzo del docking Ollama (l'egg Pterodactyl esposto in precedenza)
+  base-url: "http://127.0.0.1:11434"
+  # Modello di default se l'NPC non ne specifica uno proprio
+  default-model: "qwen2.5:1.5b"
+  # Timeout massimo per una richiesta, oltre il quale scatta il fallback
+  timeout-ms: 8000
+  # Tentativi aggiuntivi in caso di errore di rete/timeout (0 = nessun retry)
+  max-retries: 1
+  retry-delay-ms: 500
+
+conversation:
+  # Quante iterazioni (coppie o singoli messaggi) mantenere per ogni coppia npc/player
+  history-size: 20
+  # Cache in RAM (Caffeine): riduce le letture da MySQL ad ogni messaggio
+  cache-max-entries: 5000
+  cache-expire-after-minutes: 30
+  # Ogni quanti minuti far girare il job che allinea/pulisce MySQL oltre history-size
+  cleanup-interval-minutes: 10
+
+rate-limit:
+  # Tempo minimo tra due richieste AI dello stesso player, in millisecondi
+  per-player-cooldown-ms: 3000
+
+fallback:
+  enabled: true
+  messages:
+    - "*L'NPC annuisce, distratto, e non sembra capire bene cosa dici.*"
+    - "*L'NPC è impegnato e ti risponde a monosillabi.*"
+    - "*L'NPC ti guarda in silenzio per un momento, poi cambia discorso.*"
+
+# Configurazione opzionale per singolo NPC (chiave = npc_id di Citizens).
+# Se un NPC non è elencato qui, usa i default sopra e un system prompt generico.
+npcs:
+  default:
+    model: "qwen2.5:1.5b"
+    system-prompt: >
+      Sei {name}, un personaggio che vive in un mondo di Minecraft.
+      Backstory: {backstory}
+      Personalità: {personality}
+      Rispondi sempre restando nel personaggio, in italiano, con risposte brevi
+      (massimo 2-3 frasi), adatte a una chat di gioco.

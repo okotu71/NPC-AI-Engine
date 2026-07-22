@@ -1,0 +1,22 @@
+name: OkotuNpcAiEngine
+version: '${project.version}'
+main: com.okotu.npcai.OkotuNpcAiPlugin
+api-version: '1.20'
+author: okotu
+description: Motore di dialogo AI per NPC Citizens, con backend Ollama e persistenza MySQL.
+
+depend: [Citizens]
+
+commands:
+  okotunpc:
+    description: Comandi di amministrazione per okotu-npc-ai-engine
+    usage: /okotunpc <reload|setmodel|info>
+    permission: okotu.npcai.admin
+
+permissions:
+  okotu.npcai.admin:
+    description: Permette di gestire il plugin (reload, config per NPC)
+    default: op
+  okotu.npcai.talk:
+    description: Permette di parlare con gli NPC gestiti dal plugin
+    default: true
