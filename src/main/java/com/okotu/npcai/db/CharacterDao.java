@@ -9,20 +9,22 @@ import java.sql.SQLException;
 import java.util.Optional;
 
 /**
- * Accesso a npc_character. Tutti i metodi sono bloccanti: vanno sempre chiamati
- * da un thread asincrono (mai dal main thread del server).
+ * Access to the npc_character table. All methods are blocking: always call
+ * them from an async thread (never from the server main thread).
  */
 public class CharacterDao {
 
     private final Database database;
+    private final String table;
 
     public CharacterDao(Database database) {
         this.database = database;
+        this.table = database.table("npc_character");
     }
 
     public Optional<NpcCharacter> find(int npcId) throws SQLException {
         String sql = "SELECT npc_id, nome, backstory, personalita, tratti_json, model "
-                + "FROM npc_character WHERE npc_id = ?";
+                + "FROM " + table + " WHERE npc_id = ?";
         try (Connection conn = database.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setInt(1, npcId);
@@ -42,7 +44,7 @@ public class CharacterDao {
         }
     }
 
-    /** Ritorna il personaggio esistente, oppure lo crea con valori di default e lo ritorna. */
+    /** Returns the existing character, or creates it with default values and returns it. */
     public NpcCharacter findOrCreate(int npcId, String fallbackNome) throws SQLException {
         Optional<NpcCharacter> existing = find(npcId);
         if (existing.isPresent()) {
@@ -54,7 +56,7 @@ public class CharacterDao {
     }
 
     private void insert(NpcCharacter character) throws SQLException {
-        String sql = "INSERT INTO npc_character (npc_id, nome, backstory, personalita, tratti_json, model) "
+        String sql = "INSERT INTO " + table + " (npc_id, nome, backstory, personalita, tratti_json, model) "
                 + "VALUES (?, ?, ?, ?, CAST(? AS JSON), ?) "
                 + "ON DUPLICATE KEY UPDATE nome = VALUES(nome)";
         try (Connection conn = database.getConnection();
@@ -70,7 +72,7 @@ public class CharacterDao {
     }
 
     public void updateBackstory(int npcId, String backstory, String personalita) throws SQLException {
-        String sql = "UPDATE npc_character SET backstory = ?, personalita = ? WHERE npc_id = ?";
+        String sql = "UPDATE " + table + " SET backstory = ?, personalita = ? WHERE npc_id = ?";
         try (Connection conn = database.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, backstory);
@@ -81,7 +83,7 @@ public class CharacterDao {
     }
 
     public void updateModel(int npcId, String model) throws SQLException {
-        String sql = "UPDATE npc_character SET model = ? WHERE npc_id = ?";
+        String sql = "UPDATE " + table + " SET model = ? WHERE npc_id = ?";
         try (Connection conn = database.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, model);

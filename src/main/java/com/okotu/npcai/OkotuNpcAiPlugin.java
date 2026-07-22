@@ -14,6 +14,7 @@ import com.okotu.npcai.util.RateLimiter;
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.java.JavaPlugin;
 
+import java.io.File;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -32,13 +33,14 @@ public class OkotuNpcAiPlugin extends JavaPlugin {
     @Override
     public void onEnable() {
         if (Bukkit.getPluginManager().getPlugin("Citizens") == null) {
-            getLogger().severe("Citizens non trovato: okotu-npc-ai-engine richiede il plugin Citizens. Disabilito.");
+            getLogger().severe("Citizens not found: okotu-npc-ai-engine requires the Citizens plugin. Disabling.");
             Bukkit.getPluginManager().disablePlugin(this);
             return;
         }
 
-        saveDefaultConfig();
-        // Executor dedicato per DB + HTTP: mai usare il thread principale del server per queste operazioni
+        ensureDefaultConfigExists();
+
+        // Dedicated executor for DB + HTTP work: never use the server main thread for these
         this.asyncExecutor = Executors.newFixedThreadPool(4, r -> {
             Thread t = new Thread(r, "okotu-npc-ai-worker");
             t.setDaemon(true);
@@ -56,13 +58,36 @@ public class OkotuNpcAiPlugin extends JavaPlugin {
             command.setExecutor(new OkotuCommand(this));
         }
 
-        long intervalTicks = pluginConfig.cleanupIntervalMinutes * 60L * 20L; // minuti -> tick (20 tick/s)
+        long intervalTicks = pluginConfig.cleanupIntervalMinutes * 60L * 20L; // minutes -> ticks (20 ticks/s)
         Bukkit.getScheduler().runTaskTimerAsynchronously(this,
                 new CleanupTask(this, conversationDao, pluginConfig.historySize),
                 intervalTicks, intervalTicks);
 
-        getLogger().info("okotu-npc-ai-engine avviato. Docking Ollama: " + pluginConfig.ollamaBaseUrl
-                + " | modello default: " + pluginConfig.ollamaDefaultModel);
+        getLogger().info("okotu-npc-ai-engine v" + getDescription().getVersion() + " started."
+                + " Profile: " + pluginConfig.activeProfile
+                + " | Database: " + database.databaseName()
+                + " | Table prefix: '" + pluginConfig.mysqlTablePrefix + "'"
+                + " | Ollama docking: " + pluginConfig.ollamaBaseUrl
+                + " | Default model: " + pluginConfig.ollamaDefaultModel);
+    }
+
+    /**
+     * Makes sure plugins/OkotuNpcAiEngine/config.yml exists, creating it from the
+     * bundled default (src/main/resources/config.yml) on first run. plugin.yml
+     * itself is a build-time manifest packaged inside the jar (Bukkit needs it
+     * to even load the plugin), so it cannot be "created" at runtime the same
+     * way config.yml can - if it's ever missing from a built jar, that's a
+     * packaging/build issue (see README "Troubleshooting"), not something this
+     * method can fix from inside the plugin.
+     */
+    private void ensureDefaultConfigExists() {
+        File configFile = new File(getDataFolder(), "config.yml");
+        if (!configFile.exists()) {
+            getLogger().info("config.yml not found, creating default configuration...");
+            saveDefaultConfig();
+        } else {
+            reloadConfig();
+        }
     }
 
     private void initializeComponents() {
@@ -79,14 +104,18 @@ public class OkotuNpcAiPlugin extends JavaPlugin {
                 pluginConfig, characterDao, conversationCache, ollamaClient, asyncExecutor, getLogger());
     }
 
-    /** Richiamato da /okotunpc reload. Ricrea config e componenti dipendenti; NON cambia il pool MySQL a caldo. */
+    /**
+     * Called by /okotunpc reload. Re-reads config.yml and re-creates the
+     * dependent components. Does NOT hot-swap the MySQL pool (host/db/profile
+     * changes still require a full server restart).
+     */
     public void reloadPlugin() {
         reloadConfig();
         this.pluginConfig = new PluginConfig(this);
         this.ollamaClient = new OllamaClient(pluginConfig, getLogger(), asyncExecutor);
         this.conversationService = new ConversationService(
                 pluginConfig, characterDao, conversationCache, ollamaClient, asyncExecutor, getLogger());
-        getLogger().info("Configurazione ricaricata.");
+        getLogger().info("Configuration reloaded (profile: " + pluginConfig.activeProfile + ").");
     }
 
     @Override
@@ -105,7 +134,7 @@ public class OkotuNpcAiPlugin extends JavaPlugin {
         if (database != null) {
             database.close();
         }
-        getLogger().info("okotu-npc-ai-engine arrestato.");
+        getLogger().info("okotu-npc-ai-engine stopped.");
     }
 
     public CharacterDao getCharacterDao() {

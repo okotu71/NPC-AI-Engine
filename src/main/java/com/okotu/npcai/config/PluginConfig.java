@@ -5,18 +5,33 @@ import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.plugin.Plugin;
 
 import java.util.List;
+import java.util.logging.Logger;
 
 /**
- * Lettura tipizzata di config.yml. Ricreata ad ogni /okotunpc reload.
+ * Typed reading of config.yml. Re-created on every /okotunpc reload.
+ *
+ * <p>MySQL credentials are split into two named profiles, "prod" and "test",
+ * selected via {@code active-profile} in config.yml. This can be overridden
+ * without editing the file by starting the server with:
+ * {@code -Dokotu.profile=test} (or "prod"). The system property always wins
+ * over the config.yml value.
  */
 public class PluginConfig {
 
-    // --- mysql ---
+    public static final String PROFILE_SYSTEM_PROPERTY = "okotu.profile";
+
+    // --- active profile ---
+    public final String activeProfile;
+
+    // --- mysql (resolved from the active profile) ---
     public final String mysqlHost;
     public final int mysqlPort;
     public final String mysqlDatabase;
     public final String mysqlUsername;
     public final String mysqlPassword;
+    public final String mysqlTablePrefix;
+
+    // --- mysql (shared across profiles) ---
     public final int mysqlPoolSize;
     public final String mysqlExtraParams;
 
@@ -46,14 +61,33 @@ public class PluginConfig {
 
     public PluginConfig(Plugin plugin) {
         FileConfiguration cfg = plugin.getConfig();
+        Logger logger = plugin.getLogger();
 
-        this.mysqlHost = cfg.getString("mysql.host", "localhost");
-        this.mysqlPort = cfg.getInt("mysql.port", 3306);
-        this.mysqlDatabase = cfg.getString("mysql.database", "okotu_npc");
-        this.mysqlUsername = cfg.getString("mysql.username", "okotu");
-        this.mysqlPassword = cfg.getString("mysql.password", "");
-        this.mysqlPoolSize = cfg.getInt("mysql.pool-size", 10);
-        this.mysqlExtraParams = cfg.getString("mysql.extra-params", "");
+        String configuredProfile = cfg.getString("active-profile", "prod");
+        String resolvedProfile = System.getProperty(PROFILE_SYSTEM_PROPERTY, configuredProfile);
+        if (!"prod".equalsIgnoreCase(resolvedProfile) && !"test".equalsIgnoreCase(resolvedProfile)) {
+            logger.warning("Unknown profile '" + resolvedProfile + "' (expected 'prod' or 'test'), "
+                    + "falling back to 'prod'.");
+            resolvedProfile = "prod";
+        }
+        this.activeProfile = resolvedProfile.toLowerCase();
+
+        ConfigurationSection profileSection = cfg.getConfigurationSection(activeProfile);
+        if (profileSection == null) {
+            logger.severe("Profile '" + activeProfile + "' is missing from config.yml! "
+                    + "Falling back to built-in defaults, please check your configuration.");
+        }
+
+        this.mysqlHost = getFromProfile(profileSection, "mysql-host", "localhost");
+        this.mysqlPort = profileSection != null ? profileSection.getInt("mysql-port", 3306) : 3306;
+        this.mysqlDatabase = getFromProfile(profileSection, "mysql-database",
+                "prod".equals(activeProfile) ? "okotu_npc_ai" : "okotu_npc_ai_test");
+        this.mysqlUsername = getFromProfile(profileSection, "mysql-username", "okotu");
+        this.mysqlPassword = getFromProfile(profileSection, "mysql-password", "");
+        this.mysqlTablePrefix = getFromProfile(profileSection, "mysql-table-prefix", "");
+
+        this.mysqlPoolSize = cfg.getInt("mysql-pool-size", 10);
+        this.mysqlExtraParams = cfg.getString("mysql-extra-params", "");
 
         this.ollamaBaseUrl = trimTrailingSlash(cfg.getString("ollama.base-url", "http://127.0.0.1:11434"));
         this.ollamaDefaultModel = cfg.getString("ollama.default-model", "qwen2.5:1.5b");
@@ -77,19 +111,23 @@ public class PluginConfig {
                 : defaultPromptFallback();
     }
 
-    private static String defaultPromptFallback() {
-        return "Sei {name}. Backstory: {backstory}. Personalita': {personality}. "
-                + "Rispondi restando nel personaggio, in italiano, in modo breve.";
+    private static String getFromProfile(ConfigurationSection section, String key, String fallback) {
+        return section != null ? section.getString(key, fallback) : fallback;
     }
 
-    /** Modello configurato per un NPC specifico, o null se non presente in config.yml (npcs.<id>.model). */
+    private static String defaultPromptFallback() {
+        return "You are {name}. Backstory: {backstory}. Personality: {personality}. "
+                + "Always stay in character, answer briefly.";
+    }
+
+    /** Model configured for a specific NPC, or null if not present in config.yml (npcs.<id>.model). */
     public String modelOverrideFor(int npcId) {
         if (npcsSection == null) return null;
         ConfigurationSection section = npcsSection.getConfigurationSection(String.valueOf(npcId));
         return section != null ? section.getString("model", null) : null;
     }
 
-    /** Template di system prompt per un NPC specifico, o il default globale se non presente. */
+    /** System prompt template for a specific NPC, or the global default if not present. */
     public String systemPromptTemplateFor(int npcId) {
         if (npcsSection != null) {
             ConfigurationSection section = npcsSection.getConfigurationSection(String.valueOf(npcId));

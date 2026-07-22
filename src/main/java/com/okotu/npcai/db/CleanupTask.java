@@ -6,10 +6,10 @@ import java.sql.SQLException;
 import java.util.logging.Level;
 
 /**
- * Girato periodicamente (async) per allineare MySQL alla finestra scorrevole:
- * la cache Caffeine gia' limita cosa viene tenuto in RAM, ma su MySQL i vecchi
- * messaggi restano finche' questo job non li rimuove. Farlo qui invece che ad
- * ogni singolo insert evita un DELETE con window function su ogni messaggio.
+ * Run periodically (async) to align MySQL with the configured sliding window:
+ * the Caffeine cache already limits what's kept in RAM, but old messages
+ * remain in MySQL until this job removes them. Doing it here instead of on
+ * every single insert avoids a window-function DELETE on every message.
  */
 public class CleanupTask implements Runnable {
 
@@ -28,10 +28,10 @@ public class CleanupTask implements Runnable {
         try {
             int deleted = conversationDao.trimAllHistories(historySize);
             if (deleted > 0) {
-                plugin.getLogger().fine("Cleanup conversazioni: rimosse " + deleted + " righe oltre la finestra.");
+                plugin.getLogger().fine("Conversation cleanup: removed " + deleted + " rows beyond the window.");
             }
         } catch (SQLException e) {
-            plugin.getLogger().log(Level.WARNING, "Errore durante il cleanup periodico delle conversazioni", e);
+            plugin.getLogger().log(Level.WARNING, "Error during periodic conversation cleanup", e);
         }
     }
 }
