@@ -6,7 +6,7 @@
 # separate terms of service, privacy policy, and support
 # documentation.
 
-name: NPC-AI-Engine
+name: okotu-npc-ai-engine
 
 on:
   push:
