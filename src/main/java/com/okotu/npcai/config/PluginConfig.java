@@ -118,7 +118,7 @@ public class PluginConfig {
         String summaryModel = cfg.getString("ollama.summary-model", "");
         this.ollamaSummaryModel = (summaryModel == null || summaryModel.isBlank())
                 ? this.ollamaDefaultModel : summaryModel;
-        this.ollamaTimeoutMs = cfg.getLong("ollama.timeout-ms", 8000);
+        this.ollamaTimeoutMs = cfg.getLong("ollama.timeout-ms", 16000);
         this.ollamaMaxRetries = cfg.getInt("ollama.max-retries", 1);
         this.ollamaRetryDelayMs = cfg.getLong("ollama.retry-delay-ms", 500);
 
