@@ -6,7 +6,7 @@
 # separate terms of service, privacy policy, and support
 # documentation.
 
-name: Java CI with Maven
+name: NPC-AI-Engine
 
 on:
   push:
@@ -29,3 +29,13 @@ jobs:
         cache: maven
     - name: Build with Maven
       run: mvn -B package --file pom.xml
+
+    - name: Read Maven version
+        id: version
+        run: echo "VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)" >> $GITHUB_OUTPUT
+      
+      - name: Upload jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: NPC-AI-Engine-${{ steps.version.outputs.VERSION }}
+          path: target/*.jar
