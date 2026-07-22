@@ -30,3 +30,8 @@ jobs:
     - name: Build with Maven
       run: mvn -B package --file pom.xml
 
+- name: Upload Jar
+  uses: actions/upload-artifact@v4
+  with:
+    name: okotu-npc-ai-engine
+    path: target/*.jar
