@@ -22,9 +22,43 @@ in that sandbox). Before going to production:
 
 The jar filename always embeds the Maven version (`<finalName>` in `pom.xml`
 uses `${project.artifactId}-${project.version}`), e.g.
-`okotu-npc-ai-engine-1.03.jar`. `plugin.yml`'s `version:` field is filled in
+`okotu-npc-ai-engine-1.04.jar`. `plugin.yml`'s `version:` field is filled in
 automatically at build time from the same value, so **the only place you
 need to bump the version for a new release is `pom.xml`**.
+
+## What's new in 1.04
+
+- **Faster requests to Ollama.** Every `/api/chat` call now also sends
+  `keep_alive` (keeps the model loaded in RAM between requests - avoids a
+  slow reload on the next message), and an `options` object with
+  `num_predict` (hard cap on how many tokens a reply can generate - the
+  single biggest lever for response speed, since NPC replies are meant to be
+  short anyway) and `temperature`. All three are configurable under
+  `ollama:` in `config.yml` (`keep-alive`, `num-predict`, `temperature`).
+  `stream` stays hardcoded to `false` in the code (not exposed as a config
+  option) since the plugin always needs the full reply at once.
+  - **Important detail**: `num-predict` (default 64) is deliberately
+    **not** applied to `SummaryService`'s memory-compression calls - a
+    64-token cap would chop a ~200-word summary off mid-sentence.
+    `OllamaClient.chat()` now has a second overload taking an explicit
+    `num_predict`, and summarization uses its own
+    `ollama.summary-num-predict` (default 400). If you raise
+    `conversation.summary-max-words` a lot, raise `summary-num-predict`
+    to match or summaries will get truncated.
+- **No more per-NPC model override.** `npc_profiles.model` is gone. Every
+  NPC now uses whatever `ollama.default-model` is configured in
+  `config.yml` - change that one value (e.g. to `"gemma3:1b"`) to switch
+  every NPC's model at once. If you're upgrading from 1.02/1.03 and had
+  per-NPC overrides set, see `sql/MIGRATION_1.03_TO_1.04.sql` - it shows you
+  which NPCs had a custom model *before* dropping the column, since that
+  information has nowhere left to go.
+- **Default fallback text, reworded.** You flagged the same "Neutral,
+  curious about newcomers... / An inhabitant of this world..." text again in
+  English form - it was already translated in 1.03 (see "About the old
+  default text" below for where it actually comes from and why you should
+  essentially never see it in practice). Reworded it once more here just to
+  make it visibly different from the 1.03 wording, in case you were
+  comparing the two builds side by side.
 
 ## What's new in 1.03
 
@@ -250,7 +284,7 @@ thread.
 ## Troubleshooting
 
 - **Plugin doesn't load / `plugin.yml` seems missing from the jar**: run
-  `unzip -l target/okotu-npc-ai-engine-1.03.jar | grep plugin.yml` after
+  `unzip -l target/okotu-npc-ai-engine-1.04.jar | grep plugin.yml` after
   building. A stale `target/` from a partial build can cause this - try
   `mvn clean package` from scratch.
 - **MySQL connection errors on startup**: check `active-profile` matches a
@@ -278,6 +312,23 @@ thread.
   `ollama.summary-model` than your dialogue model if quality matters more
   than compression latency (summarization runs in the background, off the
   player's critical path, so it can afford a slower/bigger model).
+
+## Migrating from 1.02/1.03 to 1.04
+
+A genuine (small) schema change this time - a real `ALTER TABLE`, not a rename:
+
+1. Update to 1.04 and start the plugin once against your existing database -
+   the new schema (without the `model` column) only affects newly-created
+   installs; on an existing database the plugin does **not** drop the column
+   for you (`CREATE TABLE IF NOT EXISTS` never touches existing tables).
+2. Run `sql/MIGRATION_1.03_TO_1.04.sql`: it first shows you which NPCs (if
+   any) had a custom per-NPC model set, then drops the `model` column. Review
+   that list before running the `ALTER TABLE` - once the column is gone,
+   there's no record of which NPCs used to have a different model.
+3. From then on, every NPC uses `ollama.default-model` from `config.yml`.
+
+If you're using a non-empty `mysql-table-prefix`, adjust the table name in
+the migration script accordingly.
 
 ## Migrating from 1.01 to 1.02
 
