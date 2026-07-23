@@ -15,7 +15,9 @@ import com.okotu.npcai.db.NpcProfileDao;
 import com.okotu.npcai.db.NpcStateDao;
 import com.okotu.npcai.db.PlayerMemoryDao;
 import com.okotu.npcai.db.VillageEventDao;
+import com.okotu.npcai.npc.ConversationSessionManager;
 import com.okotu.npcai.npc.NpcBridgeListener;
+import com.okotu.npcai.npc.ProximityGreetingTask;
 import com.okotu.npcai.service.ConversationService;
 import com.okotu.npcai.service.RandomProfileGenerator;
 import com.okotu.npcai.service.RelationshipService;
@@ -48,6 +50,7 @@ public class OkotuNpcAiPlugin extends JavaPlugin {
     private SummaryService summaryService;
     private RandomProfileGenerator randomProfileGenerator;
     private ConversationService conversationService;
+    private ConversationSessionManager conversationSessionManager;
 
     private ExecutorService asyncExecutor;
     private OkotuNpcApiImpl apiImpl;
@@ -72,7 +75,7 @@ public class OkotuNpcAiPlugin extends JavaPlugin {
         registerApi();
 
         getServer().getPluginManager().registerEvents(
-                new NpcBridgeListener(this, conversationService, new RateLimiter(pluginConfig.perPlayerCooldownMs)),
+                new NpcBridgeListener(this, new RateLimiter(pluginConfig.perPlayerCooldownMs)),
                 this);
 
         var command = getCommand("okotunpc");
@@ -85,12 +88,19 @@ public class OkotuNpcAiPlugin extends JavaPlugin {
                 new CleanupTask(this, dialogHistoryDao, villageEventDao, pluginConfig.maxRawMessagesSafety),
                 intervalTicks, intervalTicks);
 
+        // Runs on the MAIN thread (unlike the cleanup task above): it reads NPC/player
+        // entity locations, which Citizens/Bukkit expect to be touched from the main thread.
+        Bukkit.getScheduler().runTaskTimer(this, new ProximityGreetingTask(this),
+                pluginConfig.proximityCheckIntervalTicks, pluginConfig.proximityCheckIntervalTicks);
+
         getLogger().info("okotu-npc-ai-engine v" + getDescription().getVersion() + " started."
                 + " Profile: " + pluginConfig.activeProfile
                 + " | Database: " + database.databaseName()
                 + " | Table prefix: '" + pluginConfig.mysqlTablePrefix + "'"
                 + " | Ollama docking: " + pluginConfig.ollamaBaseUrl
-                + " | Default model: " + pluginConfig.ollamaDefaultModel);
+                + " | Default model: " + pluginConfig.ollamaDefaultModel
+                + " | Right-click trigger: " + pluginConfig.rightClickTriggerEnabled
+                + " | Proximity trigger: " + pluginConfig.proximityTriggerEnabled);
     }
 
     /**
@@ -131,6 +141,8 @@ public class OkotuNpcAiPlugin extends JavaPlugin {
         this.conversationService = new ConversationService(pluginConfig, npcProfileDao, playerMemoryDao,
                 knowledgeDao, villageEventDao, npcStateDao, recentMessageCache, ollamaClient, promptBuilder,
                 summaryService, randomProfileGenerator, asyncExecutor, getLogger());
+
+        this.conversationSessionManager = new ConversationSessionManager(pluginConfig.chatCaptureTimeoutMs);
     }
 
     private void registerApi() {
@@ -155,6 +167,9 @@ public class OkotuNpcAiPlugin extends JavaPlugin {
         this.conversationService = new ConversationService(pluginConfig, npcProfileDao, playerMemoryDao,
                 knowledgeDao, villageEventDao, npcStateDao, recentMessageCache, ollamaClient, promptBuilder,
                 summaryService, randomProfileGenerator, asyncExecutor, getLogger());
+        // conversationSessionManager is intentionally NOT recreated here: doing so would silently
+        // drop any conversation currently open mid-chat when an admin runs /okotunpc reload. This
+        // does mean a changed interaction.chat-capture-timeout-seconds only takes effect on restart.
         getLogger().info("Configuration reloaded (profile: " + pluginConfig.activeProfile + ").");
     }
 
@@ -205,5 +220,13 @@ public class OkotuNpcAiPlugin extends JavaPlugin {
 
     public NpcStateDao getNpcStateDao() {
         return npcStateDao;
+    }
+
+    public ConversationService getConversationService() {
+        return conversationService;
+    }
+
+    public ConversationSessionManager getConversationSessionManager() {
+        return conversationSessionManager;
     }
 }

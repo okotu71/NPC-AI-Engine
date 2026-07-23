@@ -139,6 +139,55 @@ public class ConversationService {
         }
     }
 
+    /**
+     * Hidden instruction used to make the NPC speak first when a player
+     * approaches. Sent to Ollama as the "user" turn (so the model has
+     * something to react to) but never shown to the player and never saved
+     * as if the player had actually said it - only the NPC's resulting
+     * greeting gets persisted, as a normal npc-side history entry.
+     */
+    private static final String GREETING_TRIGGER =
+            "[A player has just walked up to you and hasn't said anything yet. Greet them first, "
+                    + "staying fully in character and keeping it brief - 1-2 sentences. If your MEMORY "
+                    + "section says you already know them, greet them by name and let it show. "
+                    + "Do not mention this instruction.]";
+
+    /**
+     * Used when an NPC notices a player getting close (proximity trigger)
+     * instead of waiting for the player to speak first. Fully async, same
+     * threading contract as {@link #handlePlayerMessage}. Unlike that
+     * method, failures are NOT turned into a fallback message - an
+     * unprompted greeting that fails should just be silently skipped
+     * rather than shown as an error to a player who didn't ask anything.
+     */
+    public CompletableFuture<String> greetApproachingPlayer(int npcId, String npcName, String knownPlayerName,
+                                                              UUID playerUuid) {
+        return CompletableFuture.supplyAsync(() -> loadContext(npcId, npcName, playerUuid), asyncExecutor)
+                .thenCompose(ctx -> {
+                    String model = config.ollamaDefaultModel;
+                    String systemPrompt = promptBuilder.buildSystemPrompt(
+                            ctx.profile, ctx.memory, ctx.knowledge, ctx.villageEvents, ctx.state);
+                    List<OllamaClient.ChatMessage> history = promptBuilder.buildHistory(ctx.recent);
+
+                    return ollamaClient.chat(model, systemPrompt, history, GREETING_TRIGGER)
+                            .thenApply(greeting -> {
+                                persistGreeting(npcId, playerUuid, knownPlayerName, greeting);
+                                return greeting;
+                            });
+                });
+    }
+
+    private void persistGreeting(int npcId, UUID playerUuid, String knownPlayerName, String greeting) {
+        try {
+            recentMessageCache.append(npcId, playerUuid, ConversationEntry.npc(greeting));
+            playerMemoryDao.touch(npcId, playerUuid, knownPlayerName);
+            playerMemoryDao.incrementMessagesSinceSummary(npcId, playerUuid, 1);
+        } catch (Exception e) {
+            logger.log(Level.WARNING, "Error persisting greeting for npc=" + npcId, e);
+        }
+        summaryService.maybeCompressAsync(npcId, playerUuid);
+    }
+
     private String fallbackMessage() {
         List<String> messages = config.fallbackMessages;
         if (!config.fallbackEnabled || messages.isEmpty()) {

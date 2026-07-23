@@ -1,28 +1,30 @@
 package com.okotu.npcai.npc;
 
-import com.okotu.npcai.service.ConversationService;
+import com.okotu.npcai.OkotuNpcAiPlugin;
 import com.okotu.npcai.util.RateLimiter;
 import net.citizensnpcs.api.event.NPCRightClickEvent;
 import net.citizensnpcs.api.npc.NPC;
-import org.bukkit.ChatColor;
 import org.bukkit.Bukkit;
+import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.AsyncPlayerChatEvent;
-import org.bukkit.plugin.Plugin;
 
-import java.util.Map;
-import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.Optional;
 import java.util.logging.Level;
 
 /**
- * Bridge between Citizens and the conversation engine:
- * 1) right-click on an NPC -> the player enters "talking to NPC X" mode;
- * 2) their next chat message is intercepted (not broadcast) and sent to the AI engine;
- * 3) the reply reaches the player as a message from the NPC.
+ * Bridge between Citizens and the conversation engine. Two ways in:
+ * 1) right-click on an NPC (if {@code interaction.right-click.enabled}) -
+ *    opens a conversation session via {@link ConversationSessionManager};
+ * 2) proximity - see {@link ProximityGreetingTask}, which opens sessions the
+ *    same way when an NPC notices a player getting close and greets first.
+ *
+ * Either way, once a session is open for a player, their next chat message
+ * is intercepted here (not broadcast) and sent to the AI engine, and the
+ * reply reaches them as a message from the NPC.
  *
  * Note: uses the classic AsyncPlayerChatEvent for broader Spigot/Paper compatibility.
  * On recent Paper you can migrate to io.papermc.paper.event.player.AsyncChatEvent
@@ -30,50 +32,41 @@ import java.util.logging.Level;
  */
 public class NpcBridgeListener implements Listener {
 
-    /** How long the conversation stays "active" after the click if the player writes nothing. */
-    private static final long CONVERSATION_TIMEOUT_MS = 30_000;
-
-    private final Plugin plugin;
-    private final ConversationService conversationService;
+    private final OkotuNpcAiPlugin plugin;
     private final RateLimiter rateLimiter;
 
-    // playerUuid -> stato conversazione attiva
-    private final Map<UUID, ActiveConversation> activeConversations = new ConcurrentHashMap<>();
-
-    public NpcBridgeListener(Plugin plugin, ConversationService conversationService, RateLimiter rateLimiter) {
+    public NpcBridgeListener(OkotuNpcAiPlugin plugin, RateLimiter rateLimiter) {
         this.plugin = plugin;
-        this.conversationService = conversationService;
         this.rateLimiter = rateLimiter;
     }
 
     @EventHandler
     public void onNpcRightClick(NPCRightClickEvent event) {
+        if (!plugin.getPluginConfig().rightClickTriggerEnabled) {
+            return;
+        }
+
         NPC npc = event.getNPC();
         Player player = event.getClicker();
 
-        activeConversations.put(player.getUniqueId(), new ActiveConversation(
-                npc.getId(), npc.getName(), System.currentTimeMillis()));
+        plugin.getConversationSessionManager().start(player.getUniqueId(), npc.getId(), npc.getName());
 
         player.sendMessage(ChatColor.GRAY + "[" + npc.getName() + ChatColor.GRAY
-                + "] Type in chat to talk to them. The conversation expires after 30s of inactivity.");
+                + "] Type in chat to talk to them. The conversation expires after a bit of inactivity.");
     }
 
     @EventHandler(priority = EventPriority.LOW)
     public void onPlayerChat(AsyncPlayerChatEvent event) {
         Player player = event.getPlayer();
-        ActiveConversation active = activeConversations.get(player.getUniqueId());
-        if (active == null) {
+        Optional<ConversationSessionManager.ActiveConversation> active =
+                plugin.getConversationSessionManager().get(player.getUniqueId());
+        if (active.isEmpty()) {
             return;
         }
 
-        if (System.currentTimeMillis() - active.startedAt() > CONVERSATION_TIMEOUT_MS) {
-            activeConversations.remove(player.getUniqueId());
-            return;
-        }
-
-        // Intercetta il messaggio: non deve finire nella chat pubblica del server
+        // Intercept the message: it must not end up in the server's public chat
         event.setCancelled(true);
-        activeConversations.remove(player.getUniqueId());
+        plugin.getConversationSessionManager().clear(player.getUniqueId());
 
         if (!rateLimiter.tryAcquire(player.getUniqueId())) {
             long remaining = rateLimiter.remainingCooldownMs(player.getUniqueId());
@@ -83,10 +76,10 @@ public class NpcBridgeListener implements Listener {
         }
 
         String message = event.getMessage();
-        int npcId = active.npcId();
-        String npcName = active.npcName();
+        int npcId = active.get().npcId();
+        String npcName = active.get().npcName();
 
-        conversationService.handlePlayerMessage(npcId, npcName, player.getName(), player.getUniqueId(), message)
+        plugin.getConversationService().handlePlayerMessage(npcId, npcName, player.getName(), player.getUniqueId(), message)
                 .whenComplete((reply, throwable) -> Bukkit.getScheduler().runTask(plugin, () -> {
                     if (!player.isOnline()) {
                         return;
@@ -100,8 +93,5 @@ public class NpcBridgeListener implements Listener {
                     player.sendMessage(ChatColor.GOLD + "[" + npcName + ChatColor.GOLD + "] "
                             + ChatColor.WHITE + reply);
                 }));
-    }
-
-    private record ActiveConversation(int npcId, String npcName, long startedAt) {
     }
 }

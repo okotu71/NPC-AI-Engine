@@ -67,6 +67,14 @@ public class PluginConfig {
     public final int relationshipDefault;
     public final Map<String, Integer> relationshipActions;
 
+    // --- interaction (how a conversation gets started) ---
+    public final boolean rightClickTriggerEnabled;
+    public final boolean proximityTriggerEnabled;
+    public final double proximityRadius;
+    public final long proximityCheckIntervalTicks;
+    public final long proximityGreetCooldownMs;
+    public final long chatCaptureTimeoutMs;
+
     // --- rate limit ---
     public final long perPlayerCooldownMs;
 
@@ -146,6 +154,13 @@ public class PluginConfig {
         this.relationshipMax = cfg.getInt("relationship.max", 100);
         this.relationshipDefault = cfg.getInt("relationship.default", 0);
         this.relationshipActions = readRelationshipActions(cfg.getConfigurationSection("relationship.actions"));
+
+        this.rightClickTriggerEnabled = cfg.getBoolean("interaction.right-click.enabled", true);
+        this.proximityTriggerEnabled = cfg.getBoolean("interaction.proximity.enabled", true);
+        this.proximityRadius = cfg.getDouble("interaction.proximity.radius", 4.0);
+        this.proximityCheckIntervalTicks = cfg.getLong("interaction.proximity.check-interval-ticks", 20);
+        this.proximityGreetCooldownMs = cfg.getLong("interaction.proximity.greet-cooldown-minutes", 5) * 60_000L;
+        this.chatCaptureTimeoutMs = cfg.getLong("interaction.chat-capture-timeout-seconds", 30) * 1000L;
 
         this.perPlayerCooldownMs = cfg.getLong("rate-limit.per-player-cooldown-ms", 3000);
 

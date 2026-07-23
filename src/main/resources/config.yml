@@ -152,6 +152,33 @@ relationship:
     stole: -20
     killed-villager: -40
 
+interaction:
+  # How a conversation with an NPC gets started. Both can be on at once -
+  # proximity doesn't replace right-click, it's an alternative way in.
+  right-click:
+    # Set to false if another plugin on your server hijacks right-click on
+    # NPCs/entities (e.g. a "ride on shoulders" plugin) so it stops
+    # conflicting with talking to NPCs - proximity below then becomes the
+    # only way to start a conversation.
+    enabled: true
+  proximity:
+    # If true, an NPC notices a player who walks close enough and greets
+    # them first (AI-generated, in character, aware of relationship/memory)
+    # instead of waiting for a click.
+    enabled: true
+    # How close (in blocks) a player needs to get to trigger a greeting.
+    radius: 4.0
+    # How often (in ticks; 20 ticks = 1 second) the plugin scans for nearby
+    # players. Lower = more responsive greetings, more CPU work.
+    check-interval-ticks: 20
+    # Minimum time before the same NPC will auto-greet the same player
+    # again, so standing near an NPC doesn't repeatedly re-trigger it.
+    greet-cooldown-minutes: 5
+  # How long a conversation stays "open" (accepting the player's next chat
+  # message as a reply to the NPC, whether opened by right-click or by
+  # proximity) before it expires from inactivity.
+  chat-capture-timeout-seconds: 30
+
 rate-limit:
   # Minimum time between two AI requests from the same player, in milliseconds.
   per-player-cooldown-ms: 3000

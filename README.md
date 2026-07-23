@@ -22,9 +22,42 @@ in that sandbox). Before going to production:
 
 The jar filename always embeds the Maven version (`<finalName>` in `pom.xml`
 uses `${project.artifactId}-${project.version}`), e.g.
-`okotu-npc-ai-engine-1.04.jar`. `plugin.yml`'s `version:` field is filled in
+`okotu-npc-ai-engine-1.05.jar`. `plugin.yml`'s `version:` field is filled in
 automatically at build time from the same value, so **the only place you
 need to bump the version for a new release is `pom.xml`**.
+
+## What's new in 1.05
+
+- **Proximity-based conversations, NPC greets first.** Right-click used to be
+  the only way to start talking to an NPC - which breaks badly if another
+  plugin on your server hijacks right-clicking an NPC/entity for something
+  else (the reported case: a "climb on NPC's shoulders" plugin, so right-click
+  mounts the player before Citizens/this plugin ever sees the interaction).
+  As of 1.05, a new `ProximityGreetingTask` runs on the main thread every
+  `interaction.proximity.check-interval-ticks` and, for every spawned
+  Citizens NPC, checks for players within `interaction.proximity.radius`
+  blocks. The first time a given (NPC, player) pair gets close enough
+  (subject to `interaction.proximity.greet-cooldown-minutes` so standing
+  there doesn't repeatedly re-trigger it), **the NPC speaks first** - a
+  genuine AI-generated, in-character greeting that's aware of relationship
+  score and compressed memory (a returning player with a good relationship
+  gets greeted by name; a stranger gets a generic hello), not a canned
+  string. Right-click still works alongside it by default - set
+  `interaction.right-click.enabled: false` in config.yml if it keeps
+  conflicting with the other plugin and you want proximity to be the only
+  way in.
+- **Shared session tracking.** Whichever way a conversation starts (click or
+  proximity), it's now tracked by a single `ConversationSessionManager`
+  instead of right-click's own private map, so the two triggers never
+  fight over "is this player mid-conversation right now". Its timeout
+  (`interaction.chat-capture-timeout-seconds`, default 30) also moved out of
+  hardcoded Java into config.yml.
+- **Unprompted greetings fail silently.** If Ollama doesn't answer in time
+  for a proximity greeting, the player just doesn't get greeted (logged at
+  FINE, not shown as an error) - unlike a real question they asked, there's
+  nothing to apologize for since they didn't ask anything. The conversation
+  session still opens either way, so they can just start typing to the NPC
+  even if the auto-greeting itself didn't come through.
 
 ## What's new in 1.04
 
@@ -243,10 +276,21 @@ creates it from the bundled default on startup. Edit it, then
 
 ## In-game usage
 
-Unchanged from 1.01: right-click a Citizens NPC, the plugin listens for your
-next chat message (30s timeout), sends it to Ollama with the assembled
-prompt, and the reply appears prefixed with the NPC's name. On timeout/error,
-a random `fallback.messages` entry is used and the conversation isn't lost.
+Two ways to start talking to an NPC (both on by default, see
+`interaction:` in config.yml):
+
+- **Proximity** (new in 1.05): walk within `interaction.proximity.radius`
+  blocks of a Citizens NPC - it notices you and greets you first.
+- **Right-click**: click the NPC, it invites you to type. Disable via
+  `interaction.right-click.enabled: false` if another plugin on your server
+  hijacks right-clicking NPCs/entities for something else (see "What's new
+  in 1.05").
+
+Either way, the plugin then listens for your next chat message
+(`interaction.chat-capture-timeout-seconds`, default 30s), sends it to
+Ollama with the assembled prompt, and the reply appears prefixed with the
+NPC's name. On timeout/error, a random `fallback.messages` entry is used and
+the conversation isn't lost.
 
 ## Commands (permission `okotu.npcai.admin`, default op)
 
@@ -284,7 +328,7 @@ thread.
 ## Troubleshooting
 
 - **Plugin doesn't load / `plugin.yml` seems missing from the jar**: run
-  `unzip -l target/okotu-npc-ai-engine-1.04.jar | grep plugin.yml` after
+  `unzip -l target/okotu-npc-ai-engine-1.05.jar | grep plugin.yml` after
   building. A stale `target/` from a partial build can cause this - try
   `mvn clean package` from scratch.
 - **MySQL connection errors on startup**: check `active-profile` matches a
@@ -300,7 +344,13 @@ thread.
 ## Known limitations / suggested next steps
 
 - **Chat capture** still uses `AsyncPlayerChatEvent` (see 1.01 notes).
-- **One active conversation per player** at a time (last NPC clicked).
+- **One active conversation per player** at a time (last NPC that either
+  greeted them by proximity or that they clicked).
+- **Proximity scan cost**: `ProximityGreetingTask` is O(spawned NPCs x
+  online players in that NPC's world) every `check-interval-ticks`. Fine for
+  typical village-sized NPC counts; if you have hundreds of NPCs and
+  players, raise the interval or consider bucketing by chunk/region instead
+  of scanning every NPC every time.
 - **`npc_state` moods are generic** (tired/afraid/angry/hungry/happy), not
   target-specific ("angry at the mayor" needs a free-text mechanism like
   `notes` or a `village_events` entry - the numeric state alone can't express *who*).
