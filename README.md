@@ -1,0 +1,367 @@
+# okotu-npc-ai-engine
+
+Paper/Spigot plugin that connects Citizens-managed NPCs to an Ollama docking
+service and gives them layered, persistent memory: a stable character sheet,
+per-player relationship/memory that compresses itself over time, shared
+village-wide events, per-NPC knowledge boundaries, and a lightweight
+emotional state - all folded into a compact prompt (roughly 300-500 tokens,
+workable even on a 1-1.5B model).
+
+## Status
+
+This is a **functionally complete skeleton** (follows current Paper/Citizens/
+Ollama APIs), but it has **not been built with Maven in the environment that
+generated it** (no network access, and no JDK/`javac` either - only a JRE -
+in that sandbox). Before going to production:
+
+1. `mvn clean package` locally and fix any compile nits.
+2. Double-check the versions in `pom.xml` against what's currently published.
+3. Test on a development server before going live.
+
+## Versioning
+
+The jar filename always embeds the Maven version (`<finalName>` in `pom.xml`
+uses `${project.artifactId}-${project.version}`), e.g.
+`okotu-npc-ai-engine-1.04.jar`. `plugin.yml`'s `version:` field is filled in
+automatically at build time from the same value, so **the only place you
+need to bump the version for a new release is `pom.xml`**.
+
+## What's new in 1.04
+
+- **Faster requests to Ollama.** Every `/api/chat` call now also sends
+  `keep_alive` (keeps the model loaded in RAM between requests - avoids a
+  slow reload on the next message), and an `options` object with
+  `num_predict` (hard cap on how many tokens a reply can generate - the
+  single biggest lever for response speed, since NPC replies are meant to be
+  short anyway) and `temperature`. All three are configurable under
+  `ollama:` in `config.yml` (`keep-alive`, `num-predict`, `temperature`).
+  `stream` stays hardcoded to `false` in the code (not exposed as a config
+  option) since the plugin always needs the full reply at once.
+  - **Important detail**: `num-predict` (default 64) is deliberately
+    **not** applied to `SummaryService`'s memory-compression calls - a
+    64-token cap would chop a ~200-word summary off mid-sentence.
+    `OllamaClient.chat()` now has a second overload taking an explicit
+    `num_predict`, and summarization uses its own
+    `ollama.summary-num-predict` (default 400). If you raise
+    `conversation.summary-max-words` a lot, raise `summary-num-predict`
+    to match or summaries will get truncated.
+- **No more per-NPC model override.** `npc_profiles.model` is gone. Every
+  NPC now uses whatever `ollama.default-model` is configured in
+  `config.yml` - change that one value (e.g. to `"gemma3:1b"`) to switch
+  every NPC's model at once. If you're upgrading from 1.02/1.03 and had
+  per-NPC overrides set, see `sql/MIGRATION_1.03_TO_1.04.sql` - it shows you
+  which NPCs had a custom model *before* dropping the column, since that
+  information has nowhere left to go.
+- **Default fallback text, reworded.** You flagged the same "Neutral,
+  curious about newcomers... / An inhabitant of this world..." text again in
+  English form - it was already translated in 1.03 (see "About the old
+  default text" below for where it actually comes from and why you should
+  essentially never see it in practice). Reworded it once more here just to
+  make it visibly different from the 1.03 wording, in case you were
+  comparing the two builds side by side.
+
+## What's new in 1.03
+
+- **Full English translation.** Every player-facing and NPC-facing string is
+  now in English: the prompt sections (`SYSTEM`/`MEMORY`/`KNOWLEDGE`/`CONTEXT`),
+  the auto-built character sheet text, fallback messages, chat-capture
+  messages, relationship descriptors, the memory-compression instruction sent
+  to Ollama, error messages, log lines. **This includes the instruction that
+  tells the NPC what language to answer in** - it used to say "answer in
+  Italian", it now says "answer in English", so out of the box NPCs will now
+  reply in English instead of Italian. If your playerbase is Italian-speaking
+  and you only wanted the *code/config* in English, edit the one line in
+  `PromptBuilder.buildCharacterSection()` (`"Answer in English, briefly..."`)
+  back to Italian, or better, make it a `config.yml` setting - happy to wire
+  that up if you'd rather it be configurable than hardcoded either way.
+- **Randomized starter profiles.** The first time a player ever talks to a
+  given NPC, `RandomProfileGenerator` now picks a role/personality/
+  background/profession/speech-style independently at random from the pools
+  under `npc-defaults` in `config.yml`, instead of every new NPC getting the
+  exact same placeholder text (see "About the old default text" below).
+  Village and per-NPC model are deliberately never randomized - see the
+  comment in `RandomProfileGenerator`.
+- **Default model reconfirmed as `qwen2.5:1.5b`** in both `config.yml`
+  (`ollama.default-model`) and the built-in fallback in `PluginConfig` used
+  if that key is ever missing from config.yml.
+- **Ollama communication debug logging.** New `debug.log-ollama-communication`
+  in `config.yml` (off by default). When `true`, `OllamaClient` logs the full
+  JSON request sent to Ollama and the raw response received, to the server
+  console at INFO level, prefixed `[Ollama DEBUG]`. Very useful while tuning
+  prompts/personalities, but noisy and logs conversation content - leave it
+  off in normal production use.
+
+### About the old default text ("Neutral, curious about newcomers...")
+
+You asked where that came from: it's `NpcProfile.defaultFor()`, a hardcoded
+fallback in the Java code (`model/NpcProfile.java`) - every NPC that didn't
+have a row in `npc_profiles` yet fell back to that exact same static text
+when a conversation started, which is why every new NPC looked identical.
+That method still exists (now translated to English) but as of 1.03 it's
+only used as a last-resort fallback if the database is unreachable when a
+conversation starts - the actual first-conversation path now goes through
+`RandomProfileGenerator` instead, described above.
+
+## What was new in 1.02
+
+A full memory redesign, replacing 1.01's single `npc_character` /
+`npc_conversation_log` pair with six tables:
+
+| Table                 | Purpose                                                         | Changes how often |
+|------------------------|------------------------------------------------------------------|--------------------|
+| `npc_profiles`         | Character sheet (name, role, personality, background, village, profession, speech style, per-NPC model override) | Rarely |
+| `npc_player_memory`    | Relationship score + compressed long-term summary per (NPC, player) | Every ~30 messages |
+| `npc_dialog_history`   | Raw recent turns only (compressed away periodically)             | Every message, but self-trimming |
+| `village_events`       | Shared memory across every NPC in a village, with priority + expiry | As events happen |
+| `npc_knowledge`        | Topic -> fact pairs; an NPC only talks about what's listed here  | Rarely |
+| `npc_state`            | Emotional state (happiness/fear/anger/fatigue/hunger), 0-100     | Occasionally |
+
+### Memory compression, the core new mechanic
+
+Every `conversation.summary-trigger-messages` (default 30) raw messages
+accumulated for a given (NPC, player) pair, `SummaryService` asks Ollama to
+fold them - plus the existing summary, if any - into an updated summary
+capped at `conversation.summary-max-words` (default 200) words, saves it to
+`npc_player_memory.summary`, and deletes the raw rows from
+`npc_dialog_history`. This is what keeps long-term memory small no matter how
+long a player has been talking to an NPC. The "ULTIMI MESSAGGI" section of
+the prompt is unaffected by this - it always shows the last
+`conversation.recent-messages` (default 20) raw turns, tracked independently.
+
+### Prompt structure
+
+`PromptBuilder` assembles, in order: **SYSTEM** (character sheet - or the
+`system_prompt` column verbatim if you've authored one by hand), **MEMORIA**
+(relationship + compressed summary + notes for this player), **CONOSCENZA**
+(the NPC's `npc_knowledge` entries - explicitly instructed to admit not
+knowing things outside this list), **CONTESTO** (active `village_events` for
+the NPC's village + a short mood description derived from `npc_state`). The
+recent raw messages are passed separately as chat history to Ollama's
+`/api/chat`, not flattened into the system prompt text.
+
+### Dynamic relationships
+
+`npc_player_memory.relationship_score` (-100..100, clamped) drives the
+MEMORIA section's tone description. Adjust it via:
+- `/okotunpc relationship <npcId> <player> <delta>` (raw number), or
+- `/okotunpc relationship <npcId> <player> action:<key>` using a named delta
+  from `relationship.actions` in `config.yml` (e.g. `action:saved-villager`), or
+- the public API (`OkotuNpcApi#adjustRelationship` / `#applyRelationshipAction`)
+  from another plugin - e.g. hook it into your economy/quest/combat events.
+
+### Ollama docking: prod vs test, same as MySQL
+
+Each profile block (`prod:` / `test:`) in `config.yml` now carries **both**
+the MySQL connection **and** the Ollama docking address (`ollama-host` /
+`ollama-port`), selected together by the same `active-profile` switch (or
+`-Dokotu.profile=test`). This lets you point test traffic at a separate,
+disposable Ollama instance if you want.
+
+## Structure
+
+```
+src/main/java/com/okotu/npcai/
+├── OkotuNpcAiPlugin.java          # bootstrap: wires everything, registers the OkotuNpcApi service
+├── config/PluginConfig.java       # typed config.yml reading, incl. prod/test profile (mysql+ollama)
+├── db/
+│   ├── Database.java               # HikariCP pool + schema.sql application + table-prefix resolution
+│   ├── NpcProfileDao.java          # CRUD on npc_profiles
+│   ├── PlayerMemoryDao.java        # relationship score, summary, messages-since-summary, last_seen
+│   ├── DialogHistoryDao.java       # raw recent turns: insert/fetch/fetchAll/deleteAll/safety-trim
+│   ├── VillageEventDao.java        # shared village events: active list, add/remove, expiry cleanup
+│   ├── KnowledgeDao.java           # per-NPC topic -> fact pairs
+│   ├── NpcStateDao.java            # emotional state
+│   └── CleanupTask.java            # periodic safety-trim + expired-events cleanup
+├── cache/RecentMessageCache.java   # in-RAM cache of the last N raw turns (Caffeine)
+├── model/                          # NpcProfile, PlayerMemory, ConversationEntry, VillageEvent, KnowledgeEntry, NpcState
+├── ai/
+│   ├── OllamaClient.java           # async HTTP client for /api/chat, retry/timeout
+│   └── PromptBuilder.java          # SYSTEM/MEMORIA/CONOSCENZA/CONTESTO assembly
+├── service/
+│   ├── ConversationService.java    # orchestrates one dialogue turn end to end
+│   ├── SummaryService.java         # the memory-compression mechanic
+│   └── RelationshipService.java    # score clamping + named actions + qualitative description
+├── api/
+│   ├── OkotuNpcApi.java            # public interface for other plugins (Bukkit service)
+│   └── OkotuNpcApiImpl.java
+├── npc/NpcBridgeListener.java      # NPC click -> chat capture -> reply
+├── command/OkotuCommand.java       # /okotunpc reload|profile|knowledge|event|relationship|state|info
+└── util/RateLimiter.java           # per-player cooldown
+
+sql/
+├── okotu_npc_ai.sql                # ready-to-run reference copy for the PROD database
+├── okotu_npc_ai_test.sql           # ready-to-run reference copy for the TEST database
+└── MIGRATION_1.01_TO_1.02.sql      # data migration from the 1.01 tables into the 1.02 ones
+```
+
+## Setup
+
+### 1. Database(s)
+
+`okotu_npc_ai` (prod) and `okotu_npc_ai_test` (test), same as 1.01. Provision
+with `sql/okotu_npc_ai.sql` / `sql/okotu_npc_ai_test.sql`, or just let the
+plugin create the tables automatically on first startup - either way the
+databases themselves must already exist with a user that has privileges:
+
+```sql
+CREATE DATABASE IF NOT EXISTS okotu_npc_ai      CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE DATABASE IF NOT EXISTS okotu_npc_ai_test CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER 'usr'@'%' IDENTIFIED BY 'psw';
+GRANT ALL PRIVILEGES ON okotu_npc_ai.*      TO 'usr'@'%';
+GRANT ALL PRIVILEGES ON okotu_npc_ai_test.* TO 'usr'@'%';
+FLUSH PRIVILEGES;
+```
+
+### 2. Choosing prod vs test
+
+Same mechanism as 1.01, now covering Ollama too:
+
+```yaml
+active-profile: "prod"   # or "test"
+```
+
+Override without editing the file via `-Dokotu.profile=test` on server
+startup (wins over the config value). Switching requires a restart or
+`/okotunpc reload` - it doesn't hot-swap an already-open connection mid-session.
+
+### 3. Build
+
+```bash
+mvn clean package
+```
+
+### 4. First run
+
+If `plugins/OkotuNpcAiEngine/config.yml` doesn't exist yet, the plugin
+creates it from the bundled default on startup. Edit it, then
+`/okotunpc reload`.
+
+> **About `plugin.yml`**: it's a **build-time** manifest packaged inside the
+> jar (it's what tells Bukkit/Paper the plugin exists at all), so it can't be
+> "created at runtime" by the plugin itself. If a built jar is missing it,
+> that's a packaging issue - see Troubleshooting below.
+
+## In-game usage
+
+Unchanged from 1.01: right-click a Citizens NPC, the plugin listens for your
+next chat message (30s timeout), sends it to Ollama with the assembled
+prompt, and the reply appears prefixed with the NPC's name. On timeout/error,
+a random `fallback.messages` entry is used and the conversation isn't lost.
+
+## Commands (permission `okotu.npcai.admin`, default op)
+
+- `/okotunpc reload`
+- `/okotunpc profile <npcId> <field> <value...>` - fields: `name`, `role`,
+  `personality`, `background`, `village`, `profession`, `speech_style`,
+  `knowledge`, `system_prompt`, `model`
+- `/okotunpc knowledge add <npcId> <topic> <text...>` /
+  `/okotunpc knowledge remove <npcId> <topic>`
+- `/okotunpc event add <village> <priority> <expiresHours|never> <summary...>` /
+  `/okotunpc event remove <eventId>`
+- `/okotunpc relationship <npcId> <player> <delta>` or
+  `/okotunpc relationship <npcId> <player> action:<key>`
+- `/okotunpc state <npcId> <happiness|fear|anger|fatigue|hunger> <0-100>`
+- `/okotunpc info <npcId> [player]`
+
+## Public API for other plugins
+
+`OkotuNpcApi`, registered as a Bukkit service:
+
+```java
+RegisteredServiceProvider<OkotuNpcApi> rsp =
+        Bukkit.getServicesManager().getRegistration(OkotuNpcApi.class);
+if (rsp != null) {
+    OkotuNpcApi api = rsp.getProvider();
+    api.applyRelationshipAction(npcId, playerUuid, "saved-villager");
+    api.addVillageEvent("Oak", 5, "Gli zombie hanno distrutto il ponte.",
+            Instant.now().plus(3, ChronoUnit.DAYS));
+}
+```
+
+All methods are async (`CompletableFuture`) and safe to call from the main
+thread.
+
+## Troubleshooting
+
+- **Plugin doesn't load / `plugin.yml` seems missing from the jar**: run
+  `unzip -l target/okotu-npc-ai-engine-1.04.jar | grep plugin.yml` after
+  building. A stale `target/` from a partial build can cause this - try
+  `mvn clean package` from scratch.
+- **MySQL connection errors on startup**: check `active-profile` matches a
+  section present in `config.yml`, and that the account has privileges on
+  the configured database.
+- **Memory never compresses / `npc_dialog_history` keeps growing**: check
+  the console for `SummaryService` warnings - this almost always means
+  Ollama is unreachable or timing out. The safety cleanup job
+  (`conversation.max-raw-messages-safety`, default 90) will hard-cap the
+  table in the meantime so it can't grow unbounded, but compression will
+  keep retrying every turn until Ollama answers.
+
+## Known limitations / suggested next steps
+
+- **Chat capture** still uses `AsyncPlayerChatEvent` (see 1.01 notes).
+- **One active conversation per player** at a time (last NPC clicked).
+- **`npc_state` moods are generic** (tired/afraid/angry/hungry/happy), not
+  target-specific ("angry at the mayor" needs a free-text mechanism like
+  `notes` or a `village_events` entry - the numeric state alone can't express *who*).
+- **Multi-node failover**: `OllamaClient` still points at a single
+  `base-url` per profile; if you run multiple dockings, it'll need node
+  selection logic.
+- **Summary quality depends on the model**: with very small models (1-1.5B),
+  double check compressed summaries occasionally - consider using a larger
+  `ollama.summary-model` than your dialogue model if quality matters more
+  than compression latency (summarization runs in the background, off the
+  player's critical path, so it can afford a slower/bigger model).
+
+## Migrating from 1.02/1.03 to 1.04
+
+A genuine (small) schema change this time - a real `ALTER TABLE`, not a rename:
+
+1. Update to 1.04 and start the plugin once against your existing database -
+   the new schema (without the `model` column) only affects newly-created
+   installs; on an existing database the plugin does **not** drop the column
+   for you (`CREATE TABLE IF NOT EXISTS` never touches existing tables).
+2. Run `sql/MIGRATION_1.03_TO_1.04.sql`: it first shows you which NPCs (if
+   any) had a custom per-NPC model set, then drops the `model` column. Review
+   that list before running the `ALTER TABLE` - once the column is gone,
+   there's no record of which NPCs used to have a different model.
+3. From then on, every NPC uses `ollama.default-model` from `config.yml`.
+
+If you're using a non-empty `mysql-table-prefix`, adjust the table name in
+the migration script accordingly.
+
+## Migrating from 1.01 to 1.02
+
+**This is a real data migration, not just a rename** (unlike 1.0.0 -> 1.01).
+`npc_character` -> `npc_profiles` splits/renames columns, and
+`npc_conversation_log` -> `npc_dialog_history` renames `ruolo`/`messaggio` to
+`speaker`/`message`. Four brand-new tables have no 1.01 equivalent.
+
+Steps:
+
+1. Update to 1.02 and start the plugin once against your existing database
+   (with the same `active-profile` pointing at your current data) - this
+   creates the new tables (`CREATE TABLE IF NOT EXISTS`) alongside the old
+   1.01 ones, without touching your existing data.
+2. Run `sql/MIGRATION_1.01_TO_1.02.sql` against that database. It:
+   - copies `npc_character` -> `npc_profiles` (mapping `nome` -> `name`,
+     `personalita` -> `personality`, `backstory` -> `background`; `role`,
+     `village`, `profession`, `speech_style` come across empty/NULL since
+     1.01 never captured them - fill them in afterwards with
+     `/okotunpc profile ...`);
+   - copies `npc_conversation_log` -> `npc_dialog_history` (straight column
+     rename, same data);
+   - seeds `npc_player_memory` with `last_seen` inferred from the migrated
+     dialog history (relationship score starts at the configured default,
+     since 1.01 never tracked it);
+   - gives every migrated NPC a default `npc_state` row.
+3. Review the migrated data, then **manually** drop the old 1.01 tables
+   (commented out at the bottom of the migration script, not run
+   automatically):
+   ```sql
+   DROP TABLE npc_conversation_log;
+   DROP TABLE npc_character;
+   ```
+
+If you're using a non-empty `mysql-table-prefix`, adjust every table name in
+the migration script accordingly before running it.

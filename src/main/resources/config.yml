@@ -1,0 +1,172 @@
+# =========================================================
+# okotu-npc-ai-engine - configuration (v1.03)
+# =========================================================
+
+# Which profile to use: "prod" or "test" (see the "prod" / "test" blocks
+# below - each one bundles BOTH the MySQL connection AND the Ollama docking
+# address for that environment). Can be overridden without touching this
+# file via a JVM system property when starting the server, which takes
+# precedence over this value:
+#   -Dokotu.profile=test
+active-profile: "prod"
+
+prod:
+  mysql-host: "ip_server"
+  mysql-port: 3306
+  mysql-database: "okotu_npc_ai"
+  mysql-username: "usr"
+  mysql-password: "psw"
+  # Optional prefix prepended to every table name (e.g. "srv1_" -> "srv1_npc_profiles").
+  # Leave empty ("") to use the plain table names shown in schema.sql.
+  mysql-table-prefix: ""
+  # Ollama docking used for this profile (address/port of the egg set up earlier).
+  ollama-host: "127.0.0.1"
+  ollama-port: 11434
+
+test:
+  mysql-host: "ip_server"
+  mysql-port: 3306
+  mysql-database: "okotu_npc_ai_test"
+  mysql-username: "usr"
+  mysql-password: "psw"
+  mysql-table-prefix: ""
+  # You can point this at a separate test Ollama docking, or reuse the same one.
+  ollama-host: "127.0.0.1"
+  ollama-port: 11434
+
+# Shared connection-pool settings (apply to whichever profile is active).
+mysql-pool-size: 10
+mysql-extra-params: "useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=UTC"
+
+ollama:
+  # Model used for actual NPC dialogue. Unlike earlier versions, this is now
+  # the ONLY place the model is chosen - there is no more per-NPC override in
+  # npc_profiles (see "What's new in 1.04" in the README). Swap it for e.g.
+  # "gemma3:1b" to change every NPC's model at once.
+  default-model: "qwen2.5:1.5b"
+  # Model used for the periodic memory-compression summarization calls.
+  # Leave empty ("") to reuse default-model.
+  summary-model: ""
+  # Request timeout, after which the fallback response kicks in.
+  timeout-ms: 8000
+  # Extra attempts on network error/timeout (0 = no retries).
+  max-retries: 1
+  retry-delay-ms: 500
+  # How long Ollama keeps the model loaded in memory after this request
+  # (avoids a slow reload on the next message). Same syntax Ollama accepts
+  # elsewhere: "30m", "1h", "-1" (forever), "0" (unload immediately).
+  keep-alive: "30m"
+  # Caps how many tokens the model is allowed to generate per reply - the
+  # single biggest lever for response speed. NPC replies are meant to be
+  # short (2-3 sentences), so a low value here is normally NOT a quality
+  # tradeoff, just a safety/speed cap.
+  num-predict: 64
+  # Same idea, but for the periodic memory-compression call (SummaryService):
+  # summaries need room for up to ~summary-max-words words, so this stays
+  # much higher than num-predict above. If you raise conversation.summary-max-words
+  # a lot, raise this too or summaries will get cut off mid-sentence.
+  summary-num-predict: 400
+  # Sampling temperature: lower = more consistent/predictable, higher = more
+  # varied/creative. 0.7 is a reasonable middle ground for in-character chat.
+  temperature: 0.7
+
+conversation:
+  # How many of the most recent raw messages to include in the "RECENT
+  # MESSAGES" section of the prompt (independent from the compression trigger below).
+  recent-messages: 20
+  # After this many accumulated raw messages (player+npc) since the last
+  # compression for a given (npc, player) pair, the plugin asks Ollama to
+  # summarize them, merges the result into npc_player_memory.summary, and
+  # deletes the compressed rows from npc_dialog_history.
+  summary-trigger-messages: 30
+  summary-max-words: 200
+  # Instruction sent to Ollama when compressing memory. {max_words} is
+  # replaced with summary-max-words above.
+  summary-prompt: >
+    Summarize this conversation in at most {max_words} words, keeping only
+    the important facts (promises, gifts, notable events, favors owed). If a
+    previous summary is provided, merge the new facts into it instead of
+    discarding it.
+  # Hard safety cap per (npc, player) pair on npc_dialog_history, in case
+  # compression ever fails to keep up. Enforced by the periodic cleanup job.
+  max-raw-messages-safety: 90
+  cleanup-interval-minutes: 10
+  # In-RAM cache (Caffeine) for the "recent messages" read on every prompt build.
+  cache-max-entries: 5000
+  cache-expire-after-minutes: 30
+  # How many active village_events (highest priority first) to inject per prompt.
+  village-events-limit: 5
+  # How many npc_knowledge rows to inject per prompt.
+  knowledge-limit: 20
+
+# Pools used to randomly generate a starter character sheet the FIRST time a
+# player ever talks to a given NPC (see RandomProfileGenerator). One entry is
+# picked independently from each list. Village and per-NPC model are never
+# randomized - see the README "What's new in 1.03" section for why. Edit
+# these freely, or use /okotunpc profile to override any single NPC afterwards.
+npc-defaults:
+  roles:
+    - "Villager"
+    - "Guard"
+    - "Wanderer"
+    - "Merchant"
+    - "Elder"
+  personalities:
+    - "Friendly but a bit shy."
+    - "Gruff on the outside, kind underneath."
+    - "Cheerful and talkative."
+    - "Cautious around strangers."
+    - "Calm and thoughtful."
+    - "Blunt and impatient, but fair."
+  backgrounds:
+    - "Has lived in this village their whole life."
+    - "Arrived here a few years ago and doesn't talk much about the past."
+    - "Grew up traveling between settlements before settling down here."
+    - "Comes from a long line of villagers who helped build this place."
+    - "Used to have a very different life before ending up here."
+  professions:
+    - "Farmer"
+    - "Blacksmith"
+    - "Innkeeper"
+    - "Guard"
+    - "Merchant"
+    - "Fisherman"
+    - "Carpenter"
+  speech-styles:
+    - "Speaks slowly and deliberately."
+    - "Talks fast and often trails off mid-sentence."
+    - "Uses simple, plain language."
+    - "Has a habit of asking questions back."
+    - "Peppers sentences with old sayings."
+
+relationship:
+  min: -100
+  max: 100
+  default: 0
+  # Named deltas usable via the public API (OkotuNpcApi#applyRelationshipAction)
+  # and via "/okotunpc relationship <npcId> <player> action:<key>". Feel free
+  # to add your own keys here and reference them from other plugins/commands.
+  actions:
+    bought-item: 5
+    saved-villager: 15
+    stole: -20
+    killed-villager: -40
+
+rate-limit:
+  # Minimum time between two AI requests from the same player, in milliseconds.
+  per-player-cooldown-ms: 3000
+
+fallback:
+  enabled: true
+  messages:
+    - "*The NPC nods absentmindedly and doesn't seem to follow what you're saying.*"
+    - "*The NPC is busy and only grunts in reply.*"
+    - "*The NPC stares at you in silence for a moment, then changes the subject.*"
+
+debug:
+  # When true, logs the full request sent to Ollama (model, system prompt,
+  # message history) and the raw response received, to the server console at
+  # INFO level, prefixed "[Ollama DEBUG]". Useful to check exactly what the
+  # NPC "sees" and says, but very noisy and may log conversation content to
+  # the console/log files - leave off in normal production use.
+  log-ollama-communication: false
