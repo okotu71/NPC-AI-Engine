@@ -22,9 +22,38 @@ in that sandbox). Before going to production:
 
 The jar filename always embeds the Maven version (`<finalName>` in `pom.xml`
 uses `${project.artifactId}-${project.version}`), e.g.
-`okotu-npc-ai-engine-1.08.jar`. `plugin.yml`'s `version:` field is filled in
+`okotu-npc-ai-engine-1.09.jar`. `plugin.yml`'s `version:` field is filled in
 automatically at build time from the same value, so **the only place you
 need to bump the version for a new release is `pom.xml`**.
+
+## What's new in 1.09
+
+- **Default `ollama:` tuning updated**: `default-model` is now
+  `"Qwen2.5:0.5b"` (a smaller/faster model than the previous
+  `qwen2.5:1.5b`), `num-predict` down from 64 to 24, `summary-num-predict`
+  down from 400 to 250 - all other `ollama:` settings unchanged.
+  **Casing note**: Ollama model tags are conventionally lowercase
+  (`qwen2.5:0.5b`); this is set to `Qwen2.5:0.5b` (capital Q) exactly as
+  requested. If NPCs start failing with a "model not found"-style error
+  after upgrading, run `ollama list` on the docking server and check the
+  tag's exact casing there - config.yml has a comment calling this out too.
+  The Java-side fallback default (only used if the `ollama.default-model`
+  key is ever missing from config.yml entirely) uses the safe lowercase
+  form regardless, as a defensive fallback.
+- **Bug fix: proximity-greeted NPCs often couldn't hear your reply**, even
+  though right-click worked fine. Root cause: `ConversationSessionManager`'s
+  30-second chat-capture window started counting the moment
+  `ProximityGreetingTask` first noticed the player - not when the greeting
+  actually reached them. The Ollama round-trip for the greeting can take a
+  few seconds (worse right after `keep-alive` expires and the model needs a
+  cold load), silently eating into that window before the player even saw
+  anything to react to. Right-click never had this problem because the
+  "type now" prompt is shown synchronously, with no AI call in between.
+  `ProximityGreetingTask` now restarts the timeout right when the greeting
+  (or the failure fallback) is actually delivered - guarded so it only
+  refreshes a session that's still the same, not-yet-consumed one, to avoid
+  accidentally reopening "listening" mode for an unrelated later message if
+  the player happened to reply before the greeting text arrived.
 
 ## What's new in 1.08
 
@@ -402,7 +431,7 @@ thread.
 ## Troubleshooting
 
 - **Plugin doesn't load / `plugin.yml` seems missing from the jar**: run
-  `unzip -l target/okotu-npc-ai-engine-1.08.jar | grep plugin.yml` after
+  `unzip -l target/okotu-npc-ai-engine-1.09.jar | grep plugin.yml` after
   building. A stale `target/` from a partial build can cause this - try
   `mvn clean package` from scratch.
 - **MySQL connection errors on startup**: check `active-profile` matches a

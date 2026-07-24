@@ -109,6 +109,27 @@ public class ProximityGreetingTask implements Runnable {
                     if (!player.isOnline()) {
                         return;
                     }
+
+                    // Restart the chat-capture window now that the player actually has
+                    // something to react to. The Ollama round-trip for the greeting can
+                    // take a few seconds (a cold model load after keep-alive expired is
+                    // the usual culprit) - if the countdown had kept running from the
+                    // moment we first noticed the player, a slow greeting could eat most
+                    // or all of interaction.chat-capture-timeout-seconds before they even
+                    // saw the message, silently dropping their reply. Refreshing it here
+                    // (success or failure) means the timeout always starts counting from
+                    // when the player had a chance to respond, not from when we noticed them.
+                    //
+                    // Guarded by isActiveWith: if the player already replied while the
+                    // greeting was still in flight, handleIncomingMessage() already
+                    // consumed and cleared the session - restarting it here regardless
+                    // would silently reopen "listening" mode for whatever the player
+                    // types next, even if it's unrelated to this NPC. Only refresh if
+                    // this is still the same, not-yet-consumed session.
+                    if (sessionManager.isActiveWith(player.getUniqueId(), npcId)) {
+                        sessionManager.start(player.getUniqueId(), npcId, npcName);
+                    }
+
                     if (throwable != null) {
                         plugin.getLogger().log(Level.FINE,
                                 "Proximity greeting failed for NPC " + npcId + " (skipping silently)", throwable);

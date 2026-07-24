@@ -17,7 +17,7 @@ import java.util.concurrent.ThreadLocalRandom;
  * shared village_events, so it's left for an admin to assign explicitly
  * (`/okotunpc profile <id> village <name>`) rather than being picked at
  * random. There is no per-NPC model to set anymore since 1.04 - every NPC
- * uses whatever {@code ollama.default-model} is configured (qwen2.5:1.5b
+ * uses whatever {@code ollama.default-model} is configured (qwen2.5:0.5b
  * out of the box).
  */
 public class RandomProfileGenerator {

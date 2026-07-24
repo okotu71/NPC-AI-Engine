@@ -43,11 +43,19 @@ ollama:
   # the ONLY place the model is chosen - there is no more per-NPC override in
   # npc_profiles (see "What's new in 1.04" in the README). Swap it for e.g.
   # "gemma3:1b" to change every NPC's model at once.
-  default-model: "qwen2.5:1.5b"
+  # NOTE: Ollama model tags are conventionally lowercase (e.g. "qwen2.5:0.5b").
+  # This is set to "Qwen2.5:0.5b" (capital Q) exactly as requested - if NPCs
+  # start failing with a "model not found" error, run `ollama list` on the
+  # docking server and check the tag's exact casing there.
+  default-model: "Qwen2.5:0.5b"
   # Model used for the periodic memory-compression summarization calls.
   # Leave empty ("") to reuse default-model.
   summary-model: ""
-  # Request timeout, after which the fallback response kicks in.
+  # Request timeout for normal NPC dialogue, after which the fallback
+  # response kicks in. Does NOT apply to memory-compression summaries -
+  # see summary-timeout-ms below, which needs to be a lot higher since
+  # summaries generate far more tokens (summary-num-predict) than a short
+  # in-character reply (num-predict) and so simply take longer to finish.
   timeout-ms: 8000
   # Extra attempts on network error/timeout (0 = no retries).
   max-retries: 1
@@ -60,12 +68,18 @@ ollama:
   # single biggest lever for response speed. NPC replies are meant to be
   # short (2-3 sentences), so a low value here is normally NOT a quality
   # tradeoff, just a safety/speed cap.
-  num-predict: 64
+  num-predict: 24
   # Same idea, but for the periodic memory-compression call (SummaryService):
   # summaries need room for up to ~summary-max-words words, so this stays
   # much higher than num-predict above. If you raise conversation.summary-max-words
   # a lot, raise this too or summaries will get cut off mid-sentence.
-  summary-num-predict: 400
+  summary-num-predict: 250
+  # Timeout for the summarization call specifically (see timeout-ms above
+  # for the normal-dialogue one). Generating ~400 tokens legitimately takes
+  # longer than a short reply, especially on a small/CPU-only model - if you
+  # see "request timed out" warnings coming from SummaryService in the
+  # console, raise this (and/or lower summary-num-predict / summary-max-words).
+  summary-timeout-ms: 30000
   # Sampling temperature: lower = more consistent/predictable, higher = more
   # varied/creative. 0.7 is a reasonable middle ground for in-character chat.
   temperature: 0.7

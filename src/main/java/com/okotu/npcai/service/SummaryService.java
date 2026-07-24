@@ -87,7 +87,7 @@ public class SummaryService {
 
         String newSummary = ollamaClient
                 .chat(config.ollamaSummaryModel, systemPrompt, List.of(), userMessage.toString(),
-                        config.ollamaSummaryNumPredict)
+                        config.ollamaSummaryNumPredict, config.ollamaSummaryTimeoutMs)
                 .get(); // blocking .get() is fine here: we're already on an async worker thread
 
         playerMemoryDao.applySummary(npcId, playerUuid, newSummary.trim());

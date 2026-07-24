@@ -329,6 +329,7 @@ public class OkotuCommand implements CommandExecutor {
                 + " summary-num-predict=" + cfg.ollamaSummaryNumPredict
                 + " temperature=" + cfg.ollamaTemperature);
         sender.sendMessage(ChatColor.GRAY + "timeout-ms=" + cfg.ollamaTimeoutMs
+                + " summary-timeout-ms=" + cfg.ollamaSummaryTimeoutMs
                 + " max-retries=" + cfg.ollamaMaxRetries
                 + " retry-delay-ms=" + cfg.ollamaRetryDelayMs
                 + " debug-log=" + cfg.debugLogOllamaCommunication);

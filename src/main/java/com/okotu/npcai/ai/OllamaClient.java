@@ -31,6 +31,9 @@ public class OllamaClient {
         this.config = config;
         this.logger = logger;
         this.httpClient = HttpClient.newBuilder()
+                // Just for establishing the TCP connection - the much bigger factor for a
+                // slow/CPU-only model is generation time, which is bounded separately per
+                // call below (chat()'s timeoutMs), not this constant.
                 .connectTimeout(Duration.ofMillis(config.ollamaTimeoutMs))
                 .executor(executor)
                 .build();
@@ -38,11 +41,14 @@ public class OllamaClient {
 
     /**
      * One chat turn: [system prompt] + [history] + [current user message].
-     * Uses {@code ollama.num-predict} from config.yml as the response length
-     * cap - fine for short in-character NPC replies, but NOT for longer
-     * generations like memory summaries (see the overload below).
+     * Uses {@code ollama.num-predict} and {@code ollama.timeout-ms} from
+     * config.yml - fine for short in-character NPC replies, but NOT for
+     * longer generations like memory summaries (see the overload below):
+     * a fixed short timeout tuned for a 64-token reply will legitimately
+     * time out a 400-token summary generation, since that just takes longer
+     * to produce, especially on a small/CPU-only model.
      *
-     * @param model        Ollama model tag to use (e.g. "qwen2.5:1.5b")
+     * @param model        Ollama model tag to use (e.g. "qwen2.5:0.5b")
      * @param systemPrompt already-built system prompt (character sheet + memory + knowledge + context)
      * @param messages     history already formatted as role/content pairs (without the system prompt)
      * @param userMessage  the player's latest message
@@ -50,23 +56,25 @@ public class OllamaClient {
      */
     public CompletableFuture<String> chat(String model, String systemPrompt,
                                            List<ChatMessage> messages, String userMessage) {
-        return chat(model, systemPrompt, messages, userMessage, config.ollamaNumPredict);
+        return chat(model, systemPrompt, messages, userMessage, config.ollamaNumPredict, config.ollamaTimeoutMs);
     }
 
     /**
-     * Same as {@link #chat(String, String, List, String)} but with an
-     * explicit {@code num_predict} override - e.g. SummaryService needs
-     * room for a ~200-word summary, well beyond the short-reply default
-     * used for normal NPC dialogue.
+     * Same as {@link #chat(String, String, List, String)} but with explicit
+     * {@code num_predict}/timeout overrides - e.g. SummaryService needs room
+     * (and time) for a ~200-word summary, well beyond the short-reply
+     * defaults used for normal NPC dialogue. Use
+     * {@code ollama.summary-num-predict} / {@code ollama.summary-timeout-ms}
+     * for that case rather than guessing at a one-size-fits-all timeout.
      */
-    public CompletableFuture<String> chat(String model, String systemPrompt,
-                                           List<ChatMessage> messages, String userMessage, int numPredict) {
+    public CompletableFuture<String> chat(String model, String systemPrompt, List<ChatMessage> messages,
+                                           String userMessage, int numPredict, long timeoutMs) {
         JsonObject body = buildRequestBody(model, systemPrompt, messages, userMessage, numPredict);
-        return attemptWithRetries(body, config.ollamaMaxRetries);
+        return attemptWithRetries(body, timeoutMs, config.ollamaMaxRetries);
     }
 
-    private CompletableFuture<String> attemptWithRetries(JsonObject body, int retriesLeft) {
-        return sendRequest(body).handle((result, throwable) -> {
+    private CompletableFuture<String> attemptWithRetries(JsonObject body, long timeoutMs, int retriesLeft) {
+        return sendRequest(body, timeoutMs).handle((result, throwable) -> {
             if (throwable == null) {
                 return CompletableFuture.completedFuture(result);
             }
@@ -79,7 +87,7 @@ public class OllamaClient {
                     + retriesLeft + " attempts left): " + throwable.getMessage());
             CompletableFuture<String> delayed = new CompletableFuture<>();
             CompletableFuture.delayedExecutor(config.ollamaRetryDelayMs, java.util.concurrent.TimeUnit.MILLISECONDS)
-                    .execute(() -> attemptWithRetries(body, retriesLeft - 1)
+                    .execute(() -> attemptWithRetries(body, timeoutMs, retriesLeft - 1)
                             .whenComplete((r, t) -> {
                                 if (t != null) delayed.completeExceptionally(t);
                                 else delayed.complete(r);
@@ -88,16 +96,16 @@ public class OllamaClient {
         }).thenCompose(future -> future);
     }
 
-    private CompletableFuture<String> sendRequest(JsonObject body) {
+    private CompletableFuture<String> sendRequest(JsonObject body, long timeoutMs) {
         String url = config.ollamaBaseUrl + "/api/chat";
 
         if (config.debugLogOllamaCommunication) {
-            logger.info("[Ollama DEBUG] Request -> " + url + "\n" + body);
+            logger.info("[Ollama DEBUG] Request -> " + url + " (timeout=" + timeoutMs + "ms)\n" + body);
         }
 
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(url))
-                .timeout(Duration.ofMillis(config.ollamaTimeoutMs))
+                .timeout(Duration.ofMillis(timeoutMs))
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(body.toString()))
                 .build();

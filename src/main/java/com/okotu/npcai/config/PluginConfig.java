@@ -47,6 +47,7 @@ public class PluginConfig {
     public final String ollamaKeepAlive;
     public final int ollamaNumPredict;
     public final int ollamaSummaryNumPredict;
+    public final long ollamaSummaryTimeoutMs;
     public final double ollamaTemperature;
 
     // --- conversation / memory compression ---
@@ -126,7 +127,7 @@ public class PluginConfig {
         int ollamaPort = profileSection != null ? profileSection.getInt("ollama-port", 11434) : 11434;
         this.ollamaBaseUrl = "http://" + ollamaHost + ":" + ollamaPort;
 
-        this.ollamaDefaultModel = cfg.getString("ollama.default-model", "qwen2.5:1.5b");
+        this.ollamaDefaultModel = cfg.getString("ollama.default-model", "qwen2.5:0.5b");
         String summaryModel = cfg.getString("ollama.summary-model", "");
         this.ollamaSummaryModel = (summaryModel == null || summaryModel.isBlank())
                 ? this.ollamaDefaultModel : summaryModel;
@@ -134,8 +135,9 @@ public class PluginConfig {
         this.ollamaMaxRetries = cfg.getInt("ollama.max-retries", 1);
         this.ollamaRetryDelayMs = cfg.getLong("ollama.retry-delay-ms", 500);
         this.ollamaKeepAlive = cfg.getString("ollama.keep-alive", "30m");
-        this.ollamaNumPredict = cfg.getInt("ollama.num-predict", 64);
-        this.ollamaSummaryNumPredict = cfg.getInt("ollama.summary-num-predict", 400);
+        this.ollamaNumPredict = cfg.getInt("ollama.num-predict", 24);
+        this.ollamaSummaryNumPredict = cfg.getInt("ollama.summary-num-predict", 250);
+        this.ollamaSummaryTimeoutMs = cfg.getLong("ollama.summary-timeout-ms", 30000);
         this.ollamaTemperature = cfg.getDouble("ollama.temperature", 0.7);
 
         this.recentMessages = cfg.getInt("conversation.recent-messages", 20);
