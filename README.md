@@ -22,9 +22,39 @@ in that sandbox). Before going to production:
 
 The jar filename always embeds the Maven version (`<finalName>` in `pom.xml`
 uses `${project.artifactId}-${project.version}`), e.g.
-`okotu-npc-ai-engine-1.05.jar`. `plugin.yml`'s `version:` field is filled in
+`okotu-npc-ai-engine-1.06.jar`. `plugin.yml`'s `version:` field is filled in
 automatically at build time from the same value, so **the only place you
 need to bump the version for a new release is `pom.xml`**.
+
+## What's new in 1.06
+
+- **AI chat is now opt-in per NPC.** Every Citizens NPC used to gain a random
+  personality and start talking automatically the moment a player
+  clicked/approached it - fine for a village of speaking villagers, less
+  fine if you also have decorative, quest, or vendor NPCs from other systems
+  that should stay silent. `npc_profiles` has a new `enabled` column
+  (defaults to `0`/false); `NpcBridgeListener` and `ProximityGreetingTask`
+  both now check `EnabledNpcRegistry.isEnabled(npcId)` - a fast in-memory
+  lookup, not a database query - before doing anything at all for an NPC. A
+  disabled NPC is completely inert to this plugin: right-click passes
+  through untouched (for whatever other plugin wants it) and it's skipped
+  entirely by the proximity scan.
+- **`/okotunpc enable <npcId>`** turns AI chat on for an NPC - creates its
+  character sheet (via the same random-profile pools as before) if it
+  doesn't have one yet, or just flips the flag back on if it was previously
+  disabled (keeping whatever backstory/knowledge/relationships it already
+  had). **`/okotunpc disable <npcId>`** turns it back off without deleting
+  any of that data. Both take a plain numeric NPC id and work identically
+  from the server console or in-game - no dependency on Citizens' own
+  in-game "selected NPC" concept, which doesn't exist for a console sender.
+- **`/okotunpc version`** prints the running plugin version plus every
+  AI-related parameter currently loaded (Ollama address, model, keep-alive,
+  num-predict, temperature, timeouts/retries, conversation/summary/
+  relationship/interaction settings, count of AI-enabled NPCs) - and
+  deliberately **never** any `mysql-*` setting (host, port, database,
+  username, password, table-prefix). It's meant to be safe to run in front
+  of other people or paste into a support channel. Needs no database access,
+  so it answers instantly even from console.
 
 ## What's new in 1.05
 
@@ -276,7 +306,11 @@ creates it from the bundled default on startup. Edit it, then
 
 ## In-game usage
 
-Two ways to start talking to an NPC (both on by default, see
+**An NPC only responds if an admin has enabled it first** with
+`/okotunpc enable <npcId>` (see "What's new in 1.06") - a freshly-placed
+Citizens NPC stays silent until then.
+
+Two ways to start talking to an enabled NPC (both on by default, see
 `interaction:` in config.yml):
 
 - **Proximity** (new in 1.05): walk within `interaction.proximity.radius`
@@ -297,7 +331,8 @@ the conversation isn't lost.
 - `/okotunpc reload`
 - `/okotunpc profile <npcId> <field> <value...>` - fields: `name`, `role`,
   `personality`, `background`, `village`, `profession`, `speech_style`,
-  `knowledge`, `system_prompt`, `model`
+  `knowledge`, `system_prompt` (no `model` field since 1.04 - see "What's new
+  in 1.04")
 - `/okotunpc knowledge add <npcId> <topic> <text...>` /
   `/okotunpc knowledge remove <npcId> <topic>`
 - `/okotunpc event add <village> <priority> <expiresHours|never> <summary...>` /
@@ -305,6 +340,9 @@ the conversation isn't lost.
 - `/okotunpc relationship <npcId> <player> <delta>` or
   `/okotunpc relationship <npcId> <player> action:<key>`
 - `/okotunpc state <npcId> <happiness|fear|anger|fatigue|hunger> <0-100>`
+- `/okotunpc enable <npcId>` / `/okotunpc disable <npcId>` - turns AI chat on/off
+  for an NPC (console-friendly, see "What's new in 1.06")
+- `/okotunpc version` - running version + AI parameters only, never MySQL settings
 - `/okotunpc info <npcId> [player]`
 
 ## Public API for other plugins
@@ -328,7 +366,7 @@ thread.
 ## Troubleshooting
 
 - **Plugin doesn't load / `plugin.yml` seems missing from the jar**: run
-  `unzip -l target/okotu-npc-ai-engine-1.05.jar | grep plugin.yml` after
+  `unzip -l target/okotu-npc-ai-engine-1.06.jar | grep plugin.yml` after
   building. A stale `target/` from a partial build can cause this - try
   `mvn clean package` from scratch.
 - **MySQL connection errors on startup**: check `active-profile` matches a
@@ -362,6 +400,31 @@ thread.
   `ollama.summary-model` than your dialogue model if quality matters more
   than compression latency (summarization runs in the background, off the
   player's critical path, so it can afford a slower/bigger model).
+
+## Migrating from 1.05 to 1.06
+
+**Real schema change, and a real behaviour change** - read this before
+upgrading a server with existing NPCs that are already talking.
+
+1. Start the plugin once on 1.06 against your existing database (same
+   `active-profile`). This creates the new tables/columns it needs
+   automatically where they're missing, but `enabled` on `npc_profiles`
+   needs an explicit `ALTER TABLE` since the table already exists - the
+   automatic `CREATE TABLE IF NOT EXISTS` won't add a column to an existing
+   table.
+2. Run `sql/MIGRATION_1.05_TO_1.06.sql`. It adds the `enabled` column
+   (default `0`).
+3. **Every NPC that was already talking under 1.05 will go silent** the
+   moment that column lands, because it defaults to disabled. Either:
+   - re-enable them one at a time as needed: `/okotunpc enable <npcId>`, or
+   - uncomment the bulk `UPDATE npc_profiles SET enabled = 1;` line at the
+     bottom of the migration script to flip every existing NPC back on at
+     once, preserving the "everything talks" behaviour from 1.05 and
+     earlier.
+4. Going forward, any newly placed Citizens NPC stays silent until you
+   explicitly run `/okotunpc enable <npcId>` for it - there's no config
+   toggle to bring back "every NPC talks automatically" as the default,
+   this is intentionally opt-in now.
 
 ## Migrating from 1.02/1.03 to 1.04
 

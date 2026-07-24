@@ -47,6 +47,11 @@ public class NpcBridgeListener implements Listener {
         }
 
         NPC npc = event.getNPC();
+
+        if (!plugin.getEnabledNpcRegistry().isEnabled(npc.getId())) {
+            return; // this NPC hasn't been AI-enabled - leave the click alone for other plugins
+        }
+
         Player player = event.getClicker();
 
         plugin.getConversationSessionManager().start(player.getUniqueId(), npc.getId(), npc.getName());

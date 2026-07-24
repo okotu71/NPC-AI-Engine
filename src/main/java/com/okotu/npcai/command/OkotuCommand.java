@@ -56,6 +56,9 @@ public class OkotuCommand implements CommandExecutor {
             case "event" -> handleEvent(sender, args);
             case "relationship" -> handleRelationship(sender, args);
             case "state" -> handleState(sender, args);
+            case "enable" -> handleEnable(sender, args);
+            case "disable" -> handleDisable(sender, args);
+            case "version" -> handleVersion(sender);
             case "info" -> handleInfo(sender, args);
             default -> sendUsage(sender);
         }
@@ -71,6 +74,9 @@ public class OkotuCommand implements CommandExecutor {
         sender.sendMessage(ChatColor.YELLOW + "/okotunpc event remove <eventId>");
         sender.sendMessage(ChatColor.YELLOW + "/okotunpc relationship <npcId> <player> <delta|action:<key>>");
         sender.sendMessage(ChatColor.YELLOW + "/okotunpc state <npcId> <happiness|fear|anger|fatigue|hunger> <0-100>");
+        sender.sendMessage(ChatColor.YELLOW + "/okotunpc enable <npcId>  (lets this NPC use AI chat - console-friendly)");
+        sender.sendMessage(ChatColor.YELLOW + "/okotunpc disable <npcId>  (stops this NPC from using AI chat)");
+        sender.sendMessage(ChatColor.YELLOW + "/okotunpc version  (shows the running version and AI parameters, never SQL/MySQL settings)");
         sender.sendMessage(ChatColor.YELLOW + "/okotunpc info <npcId> [player]");
     }
 
@@ -266,6 +272,82 @@ public class OkotuCommand implements CommandExecutor {
     }
 
     // ---------------------------------------------------------------
+    // enable / disable - gate whether an NPC can use AI chat at all.
+    // Deliberately console-friendly: identifies the NPC by numeric id only,
+    // no dependency on an in-game "selected NPC" (Citizens' own selection is
+    // per-player and doesn't exist for a console sender).
+    // ---------------------------------------------------------------
+    private void handleEnable(CommandSender sender, String[] args) {
+        if (args.length < 2) {
+            sender.sendMessage(ChatColor.RED + "Usage: /okotunpc enable <npcId>");
+            return;
+        }
+        Integer npcId = parseInt(sender, args[1]);
+        if (npcId == null) return;
+
+        String fallbackName = "NPC-" + npcId;
+        runAsync(sender, "Error enabling AI for this NPC", () -> {
+            plugin.getEnabledNpcRegistry().enable(npcId,
+                    () -> plugin.getRandomProfileGenerator().generate(npcId, fallbackName));
+            sender.sendMessage(ChatColor.GREEN + "NPC " + npcId + " can now use AI chat.");
+        });
+    }
+
+    private void handleDisable(CommandSender sender, String[] args) {
+        if (args.length < 2) {
+            sender.sendMessage(ChatColor.RED + "Usage: /okotunpc disable <npcId>");
+            return;
+        }
+        Integer npcId = parseInt(sender, args[1]);
+        if (npcId == null) return;
+
+        runAsync(sender, "Error disabling AI for this NPC", () -> {
+            plugin.getEnabledNpcRegistry().disable(npcId);
+            sender.sendMessage(ChatColor.YELLOW + "NPC " + npcId + " can no longer use AI chat.");
+        });
+    }
+
+    // ---------------------------------------------------------------
+    // version - running version + AI-related parameters only.
+    // Deliberately never prints anything from the mysql-* config (host,
+    // port, database, username, password, table-prefix): this command is
+    // meant to be safe to run in front of other people / paste into a
+    // support channel without leaking database access details.
+    // No database access needed, so this runs synchronously - instant
+    // output even from console.
+    // ---------------------------------------------------------------
+    private void handleVersion(CommandSender sender) {
+        var cfg = plugin.getPluginConfig();
+
+        sender.sendMessage(ChatColor.GOLD + "okotu-npc-ai-engine v" + plugin.getDescription().getVersion()
+                + ChatColor.GRAY + "  (profile: " + cfg.activeProfile + ")");
+        sender.sendMessage(ChatColor.GRAY + "Ollama docking: " + ChatColor.WHITE + cfg.ollamaBaseUrl);
+        sender.sendMessage(ChatColor.GRAY + "Model: " + ChatColor.WHITE + cfg.ollamaDefaultModel
+                + ChatColor.GRAY + "  | Summary model: " + ChatColor.WHITE + cfg.ollamaSummaryModel);
+        sender.sendMessage(ChatColor.GRAY + "keep-alive=" + cfg.ollamaKeepAlive
+                + " num-predict=" + cfg.ollamaNumPredict
+                + " summary-num-predict=" + cfg.ollamaSummaryNumPredict
+                + " temperature=" + cfg.ollamaTemperature);
+        sender.sendMessage(ChatColor.GRAY + "timeout-ms=" + cfg.ollamaTimeoutMs
+                + " max-retries=" + cfg.ollamaMaxRetries
+                + " retry-delay-ms=" + cfg.ollamaRetryDelayMs
+                + " debug-log=" + cfg.debugLogOllamaCommunication);
+        sender.sendMessage(ChatColor.GRAY + "conversation: recent-messages=" + cfg.recentMessages
+                + " summary-trigger=" + cfg.summaryTriggerMessages
+                + " (" + cfg.summaryMaxWords + " words max)"
+                + " cache=" + cfg.cacheMaxEntries + "/" + cfg.cacheExpireAfterMinutes + "min");
+        sender.sendMessage(ChatColor.GRAY + "relationship: range " + cfg.relationshipMin + ".." + cfg.relationshipMax
+                + " (default " + cfg.relationshipDefault + ")");
+        sender.sendMessage(ChatColor.GRAY + "interaction: right-click=" + cfg.rightClickTriggerEnabled
+                + " proximity=" + cfg.proximityTriggerEnabled
+                + " (radius=" + cfg.proximityRadius + " interval=" + cfg.proximityCheckIntervalTicks + "t"
+                + " cooldown=" + (cfg.proximityGreetCooldownMs / 60_000) + "m)"
+                + " chat-capture-timeout=" + (cfg.chatCaptureTimeoutMs / 1000) + "s");
+        sender.sendMessage(ChatColor.GRAY + "AI-enabled NPCs: " + ChatColor.WHITE
+                + plugin.getEnabledNpcRegistry().enabledCount());
+    }
+
+    // ---------------------------------------------------------------
     // info
     // ---------------------------------------------------------------
     private void handleInfo(CommandSender sender, String[] args) {
@@ -293,11 +375,12 @@ public class OkotuCommand implements CommandExecutor {
             Optional<NpcProfile> profile = profileDao.find(npcId);
             if (profile.isEmpty()) {
                 sender.sendMessage(ChatColor.YELLOW + "No profile stored for NPC " + npcId
-                        + " (will be created on first conversation).");
+                        + " - run /okotunpc enable " + npcId + " to create one and let it talk.");
                 return;
             }
             NpcProfile p = profile.get();
-            sender.sendMessage(ChatColor.GOLD + "NPC " + p.npcId() + " - " + p.name());
+            sender.sendMessage(ChatColor.GOLD + "NPC " + p.npcId() + " - " + p.name()
+                    + (p.enabled() ? ChatColor.GREEN + " [AI enabled]" : ChatColor.RED + " [AI disabled]"));
             sender.sendMessage(ChatColor.GRAY + "Role: " + p.role() + " | Profession: " + p.profession()
                     + " | Village: " + p.village());
             sender.sendMessage(ChatColor.GRAY + "Model (global, set in config.yml): "

@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS npc_profiles (
     speech_style  VARCHAR(128) NULL,
     knowledge     TEXT         NULL,
     system_prompt TEXT         NULL,
+    enabled       TINYINT(1)   NOT NULL DEFAULT 0,
     created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (npc_id),

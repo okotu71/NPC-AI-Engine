@@ -7,10 +7,11 @@ import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
- * Generates a randomized starter profile the first time a player ever talks
- * to a given NPC, picking independently from the pools configured under
- * {@code npc-defaults} in config.yml (roles, personalities, backgrounds,
- * professions, speech-styles).
+ * Generates a randomized starter profile the first time an admin enables AI
+ * chat for a given NPC (see {@code EnabledNpcRegistry#enable}, run via
+ * {@code /okotunpc enable <npcId>}), picking independently from the pools
+ * configured under {@code npc-defaults} in config.yml (roles, personalities,
+ * backgrounds, professions, speech-styles).
  *
  * <p>{@code village} is deliberately left unset: village membership drives
  * shared village_events, so it's left for an admin to assign explicitly
@@ -38,7 +39,8 @@ public class RandomProfileGenerator {
                 pick(config.npcDefaultProfessions),
                 pick(config.npcDefaultSpeechStyles),
                 null,
-                null
+                null,
+                false
         );
     }
 

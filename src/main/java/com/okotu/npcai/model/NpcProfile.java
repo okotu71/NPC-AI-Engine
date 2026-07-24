@@ -11,11 +11,20 @@ package com.okotu.npcai.model;
  * had a {@code model} column here; see MIGRATION_1.03_TO_1.04.sql if
  * upgrading from a database that still has it.
  *
+ * <p>As of 1.06, {@code enabled} gates whether this NPC can use AI chat at
+ * all - new profiles are created disabled by default (see
+ * {@code EnabledNpcRegistry}), and only turn on via the explicit
+ * {@code /okotunpc enable <npcId>} console command. This field mirrors the
+ * database column for display purposes (e.g. {@code /okotunpc info}); the
+ * actual gating check at conversation time uses
+ * {@code EnabledNpcRegistry#isEnabled}, a fast in-memory lookup, not this
+ * record.
+ *
  * <p>{@link #defaultFor(int, String)} is only used as a last-resort fallback
  * (e.g. if the database is unreachable when a conversation starts). The
- * profile actually created the first time a player talks to a new NPC is
- * instead generated randomly by {@code RandomProfileGenerator} from the
- * pools configured under {@code npc-defaults} in config.yml - see
+ * profile actually created the first time an NPC is enabled is instead
+ * generated randomly by {@code RandomProfileGenerator} from the pools
+ * configured under {@code npc-defaults} in config.yml - see
  * ConversationService/RandomProfileGenerator, not this class.
  */
 public record NpcProfile(
@@ -28,7 +37,8 @@ public record NpcProfile(
         String profession,
         String speechStyle,
         String knowledge,
-        String systemPrompt
+        String systemPrompt,
+        boolean enabled
 ) {
 
     public static NpcProfile defaultFor(int npcId, String name) {
@@ -42,7 +52,8 @@ public record NpcProfile(
                 null,
                 null,
                 null,
-                null
+                null,
+                false
         );
     }
 }

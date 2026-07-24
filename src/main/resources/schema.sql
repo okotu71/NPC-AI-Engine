@@ -12,6 +12,10 @@
 -- Coming from 1.02/1.03 (npc_profiles still has a "model" column)? See
 -- MIGRATION_1.03_TO_1.04.sql: 1.04 drops that column, the Ollama model is
 -- now chosen once, globally, via ollama.default-model in config.yml.
+--
+-- Coming from before 1.06 (npc_profiles has no "enabled" column)? See
+-- MIGRATION_1.05_TO_1.06.sql: 1.06 makes AI chat opt-in per NPC (new column,
+-- defaults to disabled) instead of every NPC talking automatically.
 
 -- ---------------------------------------------------------
 -- 1) npc_profiles - the "character sheet", changes rarely
@@ -27,6 +31,7 @@ CREATE TABLE IF NOT EXISTS {{PREFIX}}npc_profiles (
     speech_style  VARCHAR(128) NULL,
     knowledge     TEXT         NULL,        -- free-text summary; structured facts live in npc_knowledge
     system_prompt TEXT         NULL,        -- if set, used verbatim instead of auto-building from the fields above
+    enabled       TINYINT(1)   NOT NULL DEFAULT 0,  -- AI chat is opt-in: 0 = NPC won't talk at all until enabled
     created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (npc_id),

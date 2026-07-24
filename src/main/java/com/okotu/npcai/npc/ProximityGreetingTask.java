@@ -54,6 +54,9 @@ public class ProximityGreetingTask implements Runnable {
             if (!npc.isSpawned()) {
                 continue;
             }
+            if (!plugin.getEnabledNpcRegistry().isEnabled(npc.getId())) {
+                continue; // this NPC hasn't been AI-enabled - skip it entirely, don't even check distances
+            }
             Location npcLocation = npc.getEntity().getLocation();
             if (npcLocation.getWorld() == null) {
                 continue;

@@ -16,6 +16,7 @@ import com.okotu.npcai.db.NpcStateDao;
 import com.okotu.npcai.db.PlayerMemoryDao;
 import com.okotu.npcai.db.VillageEventDao;
 import com.okotu.npcai.npc.ConversationSessionManager;
+import com.okotu.npcai.npc.EnabledNpcRegistry;
 import com.okotu.npcai.npc.NpcBridgeListener;
 import com.okotu.npcai.npc.ProximityGreetingTask;
 import com.okotu.npcai.service.ConversationService;
@@ -28,9 +29,11 @@ import org.bukkit.plugin.ServicePriority;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.io.File;
+import java.sql.SQLException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.logging.Level;
 
 public class OkotuNpcAiPlugin extends JavaPlugin {
 
@@ -51,6 +54,7 @@ public class OkotuNpcAiPlugin extends JavaPlugin {
     private RandomProfileGenerator randomProfileGenerator;
     private ConversationService conversationService;
     private ConversationSessionManager conversationSessionManager;
+    private EnabledNpcRegistry enabledNpcRegistry;
 
     private ExecutorService asyncExecutor;
     private OkotuNpcApiImpl apiImpl;
@@ -73,6 +77,15 @@ public class OkotuNpcAiPlugin extends JavaPlugin {
 
         initializeComponents();
         registerApi();
+
+        try {
+            enabledNpcRegistry.loadInitialState();
+        } catch (SQLException e) {
+            getLogger().log(Level.SEVERE,
+                    "Could not load the list of AI-enabled NPCs - starting with none enabled. "
+                            + "Re-run /okotunpc enable <npcId> for any NPC that should be talking, "
+                            + "or fix the underlying database issue and restart.", e);
+        }
 
         getServer().getPluginManager().registerEvents(
                 new NpcBridgeListener(this, new RateLimiter(pluginConfig.perPlayerCooldownMs)),
@@ -100,7 +113,8 @@ public class OkotuNpcAiPlugin extends JavaPlugin {
                 + " | Ollama docking: " + pluginConfig.ollamaBaseUrl
                 + " | Default model: " + pluginConfig.ollamaDefaultModel
                 + " | Right-click trigger: " + pluginConfig.rightClickTriggerEnabled
-                + " | Proximity trigger: " + pluginConfig.proximityTriggerEnabled);
+                + " | Proximity trigger: " + pluginConfig.proximityTriggerEnabled
+                + " | AI-enabled NPCs: " + enabledNpcRegistry.enabledCount());
     }
 
     /**
@@ -143,6 +157,7 @@ public class OkotuNpcAiPlugin extends JavaPlugin {
                 summaryService, randomProfileGenerator, asyncExecutor, getLogger());
 
         this.conversationSessionManager = new ConversationSessionManager(pluginConfig.chatCaptureTimeoutMs);
+        this.enabledNpcRegistry = new EnabledNpcRegistry(npcProfileDao);
     }
 
     private void registerApi() {
@@ -228,5 +243,13 @@ public class OkotuNpcAiPlugin extends JavaPlugin {
 
     public ConversationSessionManager getConversationSessionManager() {
         return conversationSessionManager;
+    }
+
+    public EnabledNpcRegistry getEnabledNpcRegistry() {
+        return enabledNpcRegistry;
+    }
+
+    public RandomProfileGenerator getRandomProfileGenerator() {
+        return randomProfileGenerator;
     }
 }

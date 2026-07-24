@@ -6,6 +6,8 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -14,6 +16,12 @@ import java.util.Optional;
  *
  * <p>No {@code model} column since 1.04 - the Ollama model is chosen purely
  * via {@code ollama.default-model} in config.yml, the same for every NPC.
+ *
+ * <p>Since 1.06, {@code enabled} gates whether an NPC can use AI chat at all
+ * (see {@link #setEnabled} and {@link #findEnabledNpcIds}). The actual
+ * runtime gating check goes through {@code EnabledNpcRegistry}'s in-memory
+ * cache, not a query against this table on every interaction - the two
+ * methods here only back that cache's initial load and updates.
  */
 public class NpcProfileDao {
 
@@ -27,7 +35,7 @@ public class NpcProfileDao {
 
     public Optional<NpcProfile> find(int npcId) throws SQLException {
         String sql = "SELECT npc_id, name, role, personality, background, village, profession, "
-                + "speech_style, knowledge, system_prompt FROM " + table + " WHERE npc_id = ?";
+                + "speech_style, knowledge, system_prompt, enabled FROM " + table + " WHERE npc_id = ?";
         try (Connection conn = database.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setInt(1, npcId);
@@ -47,9 +55,12 @@ public class NpcProfileDao {
 
     /**
      * Returns the existing profile, or creates it using whatever
-     * {@code defaultSupplier} produces (e.g. RandomProfileGenerator on first
-     * conversation, or NpcProfile.defaultFor for a plain fallback) and
-     * returns it.
+     * {@code defaultSupplier} produces (e.g. RandomProfileGenerator when an
+     * NPC is enabled, or NpcProfile.defaultFor for a plain fallback) and
+     * returns it. New profiles are always created disabled regardless of
+     * what the supplier's {@code enabled} field says - use
+     * {@link #setEnabled} right after if the caller actually means to
+     * enable it (see {@code EnabledNpcRegistry#enable}).
      */
     public NpcProfile findOrCreate(int npcId, java.util.function.Supplier<NpcProfile> defaultSupplier) throws SQLException {
         Optional<NpcProfile> existing = find(npcId);
@@ -96,6 +107,31 @@ public class NpcProfileDao {
         }
     }
 
+    /** Flips whether an NPC is allowed to use AI chat. No-op (0 rows affected) if the NPC has no profile yet. */
+    public void setEnabled(int npcId, boolean enabled) throws SQLException {
+        String sql = "UPDATE " + table + " SET enabled = ? WHERE npc_id = ?";
+        try (Connection conn = database.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setBoolean(1, enabled);
+            ps.setInt(2, npcId);
+            ps.executeUpdate();
+        }
+    }
+
+    /** All NPC ids currently allowed to use AI chat. Used once at startup to seed EnabledNpcRegistry's cache. */
+    public List<Integer> findEnabledNpcIds() throws SQLException {
+        String sql = "SELECT npc_id FROM " + table + " WHERE enabled = 1";
+        List<Integer> ids = new ArrayList<>();
+        try (Connection conn = database.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                ids.add(rs.getInt("npc_id"));
+            }
+        }
+        return ids;
+    }
+
     private static final java.util.Set<String> ALLOWED_COLUMNS = java.util.Set.of(
             "name", "role", "personality", "background", "village",
             "profession", "speech_style", "knowledge", "system_prompt");
@@ -115,7 +151,8 @@ public class NpcProfileDao {
                 rs.getString("profession"),
                 rs.getString("speech_style"),
                 rs.getString("knowledge"),
-                rs.getString("system_prompt")
+                rs.getString("system_prompt"),
+                rs.getBoolean("enabled")
         );
     }
 }
