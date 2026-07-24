@@ -22,9 +22,28 @@ in that sandbox). Before going to production:
 
 The jar filename always embeds the Maven version (`<finalName>` in `pom.xml`
 uses `${project.artifactId}-${project.version}`), e.g.
-`okotu-npc-ai-engine-1.06.jar`. `plugin.yml`'s `version:` field is filled in
+`okotu-npc-ai-engine-1.07.jar`. `plugin.yml`'s `version:` field is filled in
 automatically at build time from the same value, so **the only place you
 need to bump the version for a new release is `pom.xml`**.
+
+## What's new in 1.07
+
+- **Bug fix: replies weren't reaching Ollama at all on some Paper setups.**
+  The NPC would greet first via proximity just fine (that part doesn't
+  depend on chat), but typing a reply did nothing - no error, no request
+  sent, nothing. Root cause: `NpcBridgeListener` only listened for the
+  legacy `org.bukkit.event.player.AsyncPlayerChatEvent`. Paper reworked its
+  chat pipeline around 1.19.1 in favor of the Adventure-Component-based
+  `io.papermc.paper.event.player.AsyncChatEvent`; depending on the server
+  and what other chat-related plugins are installed, the legacy event can
+  simply never fire, so the plugin never saw the player's message at all -
+  the conversation session opened correctly, it just never got consumed.
+  `NpcBridgeListener` now listens for **both** event types and funnels them
+  through the same handler. If a server happens to fire both for the same
+  physical message, only the first one does anything (the session gets
+  cleared as soon as it's consumed, so the second one finds nothing to do) -
+  no duplicate requests to Ollama, no double relationship/summary updates.
+  No config changes needed, this just works better after upgrading the jar.
 
 ## What's new in 1.06
 
@@ -366,7 +385,7 @@ thread.
 ## Troubleshooting
 
 - **Plugin doesn't load / `plugin.yml` seems missing from the jar**: run
-  `unzip -l target/okotu-npc-ai-engine-1.06.jar | grep plugin.yml` after
+  `unzip -l target/okotu-npc-ai-engine-1.07.jar | grep plugin.yml` after
   building. A stale `target/` from a partial build can cause this - try
   `mvn clean package` from scratch.
 - **MySQL connection errors on startup**: check `active-profile` matches a
@@ -381,7 +400,9 @@ thread.
 
 ## Known limitations / suggested next steps
 
-- **Chat capture** still uses `AsyncPlayerChatEvent` (see 1.01 notes).
+- **Chat capture** listens to both the legacy `AsyncPlayerChatEvent` and
+  Paper's `AsyncChatEvent` since 1.07 (see "What's new in 1.07") for broad
+  compatibility across server/plugin setups.
 - **One active conversation per player** at a time (last NPC that either
   greeted them by proximity or that they clicked).
 - **Proximity scan cost**: `ProximityGreetingTask` is O(spawned NPCs x

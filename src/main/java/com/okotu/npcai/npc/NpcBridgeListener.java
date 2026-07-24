@@ -2,8 +2,10 @@ package com.okotu.npcai.npc;
 
 import com.okotu.npcai.OkotuNpcAiPlugin;
 import com.okotu.npcai.util.RateLimiter;
+import io.papermc.paper.event.player.AsyncChatEvent;
 import net.citizensnpcs.api.event.NPCRightClickEvent;
 import net.citizensnpcs.api.npc.NPC;
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
@@ -26,9 +28,17 @@ import java.util.logging.Level;
  * is intercepted here (not broadcast) and sent to the AI engine, and the
  * reply reaches them as a message from the NPC.
  *
- * Note: uses the classic AsyncPlayerChatEvent for broader Spigot/Paper compatibility.
- * On recent Paper you can migrate to io.papermc.paper.event.player.AsyncChatEvent
- * (based on Adventure Component) if you want rich message formatting.
+ * <p><b>Listens for chat on both the legacy {@link AsyncPlayerChatEvent} and
+ * Paper's newer {@link AsyncChatEvent}.</b> Which one actually fires depends
+ * on the server/other plugins (Paper reworked chat around 1.19.1; some
+ * setups no longer fire the legacy event at all, especially with other chat
+ * plugins installed) - listening to only one risks silently never seeing the
+ * player's reply (the AI request never even gets sent). Both handlers funnel
+ * into {@link #handleIncomingMessage}, which is itself safe to call twice
+ * for the "same" message: the first call clears the session via
+ * {@link ConversationSessionManager#clear}, so if both events happen to fire
+ * for one real chat message, the second call just finds no active session
+ * and no-ops - no duplicate request to Ollama.
  */
 public class NpcBridgeListener implements Listener {
 
@@ -60,27 +70,47 @@ public class NpcBridgeListener implements Listener {
                 + "] Type in chat to talk to them. The conversation expires after a bit of inactivity.");
     }
 
+    /** Legacy Bukkit/Spigot chat event - still what fires on many setups. */
     @EventHandler(priority = EventPriority.LOW)
-    public void onPlayerChat(AsyncPlayerChatEvent event) {
-        Player player = event.getPlayer();
+    public void onLegacyPlayerChat(AsyncPlayerChatEvent event) {
+        boolean handled = handleIncomingMessage(event.getPlayer(), event.getMessage());
+        if (handled) {
+            event.setCancelled(true);
+        }
+    }
+
+    /** Paper's newer, Adventure-Component-based chat event. */
+    @EventHandler(priority = EventPriority.LOW)
+    public void onAsyncChat(AsyncChatEvent event) {
+        String plainMessage = PlainTextComponentSerializer.plainText().serialize(event.message());
+        boolean handled = handleIncomingMessage(event.getPlayer(), plainMessage);
+        if (handled) {
+            event.setCancelled(true);
+        }
+    }
+
+    /**
+     * @return true if this message was consumed as a reply to an NPC (caller must cancel its event),
+     *         false if the player has no open conversation and the message should go through normally.
+     */
+    private boolean handleIncomingMessage(Player player, String message) {
         Optional<ConversationSessionManager.ActiveConversation> active =
                 plugin.getConversationSessionManager().get(player.getUniqueId());
         if (active.isEmpty()) {
-            return;
+            return false;
         }
 
-        // Intercept the message: it must not end up in the server's public chat
-        event.setCancelled(true);
+        // Consume the session immediately so a second event for the same physical
+        // message (legacy + Paper both firing) is a no-op instead of a duplicate request.
         plugin.getConversationSessionManager().clear(player.getUniqueId());
 
         if (!rateLimiter.tryAcquire(player.getUniqueId())) {
             long remaining = rateLimiter.remainingCooldownMs(player.getUniqueId());
             Bukkit.getScheduler().runTask(plugin, () -> player.sendMessage(
                     ChatColor.RED + "Wait " + (remaining / 1000.0) + "s before talking to an NPC again."));
-            return;
+            return true;
         }
 
-        String message = event.getMessage();
         int npcId = active.get().npcId();
         String npcName = active.get().npcName();
 
@@ -98,5 +128,6 @@ public class NpcBridgeListener implements Listener {
                     player.sendMessage(ChatColor.GOLD + "[" + npcName + ChatColor.GOLD + "] "
                             + ChatColor.WHITE + reply);
                 }));
+        return true;
     }
 }

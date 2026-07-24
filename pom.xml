@@ -6,7 +6,7 @@
 
     <groupId>com.okotu</groupId>
     <artifactId>okotu-npc-ai-engine</artifactId>
-    <version>1.06</version>
+    <version>1.07</version>
     <packaging>jar</packaging>
 
     <properties>
@@ -24,6 +24,9 @@
         <caffeine.version>3.1.8</caffeine.version>
         <gson.version>2.10.1</gson.version>
         <mysql.version>8.3.0</mysql.version>
+        <!-- Bundled by Paper at runtime (provided scope); only needed here to compile
+             against AsyncChatEvent's Adventure Component message in NpcBridgeListener. -->
+        <adventure.version>4.17.0</adventure.version>
     </properties>
 
     <repositories>
@@ -43,6 +46,16 @@
             <groupId>io.papermc.paper</groupId>
             <artifactId>paper-api</artifactId>
             <version>${paper.version}</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- Per estrarre testo semplice da un Adventure Component (AsyncChatEvent#message()).
+             Paper la fornisce già a runtime (dipendenza transitiva di paper-api): provided,
+             mai shadata, serve solo a compilare NpcBridgeListener. -->
+        <dependency>
+            <groupId>net.kyori</groupId>
+            <artifactId>adventure-text-serializer-plain</artifactId>
+            <version>${adventure.version}</version>
             <scope>provided</scope>
         </dependency>
 
