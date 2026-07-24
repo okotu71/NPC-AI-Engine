@@ -22,9 +22,26 @@ in that sandbox). Before going to production:
 
 The jar filename always embeds the Maven version (`<finalName>` in `pom.xml`
 uses `${project.artifactId}-${project.version}`), e.g.
-`okotu-npc-ai-engine-1.07.jar`. `plugin.yml`'s `version:` field is filled in
+`okotu-npc-ai-engine-1.08.jar`. `plugin.yml`'s `version:` field is filled in
 automatically at build time from the same value, so **the only place you
 need to bump the version for a new release is `pom.xml`**.
+
+## What's new in 1.08
+
+- **Bug fix: memory compression timing out.** Console showed
+  `Error checking/compressing memory for npc=X player=Y` /
+  `HttpTimeoutException: request timed out` from `SummaryService`. Cause:
+  the single `ollama.timeout-ms` (8s by default) was applied to *every*
+  Ollama call, including memory-compression summaries - but those generate
+  up to `summary-num-predict` (400) tokens instead of the short
+  `num-predict` (64) used for normal dialogue, so they legitimately take
+  longer and were getting cut off by a timeout tuned for quick replies.
+  `OllamaClient.chat()` now takes an explicit timeout per call; dialogue
+  keeps using `ollama.timeout-ms` (8s default) while summarization uses a
+  new, separate `ollama.summary-timeout-ms` (30s default). If you still see
+  timeouts from `SummaryService` after upgrading (e.g. on a slow CPU-only
+  box), raise `summary-timeout-ms` further, or lower `summary-num-predict`
+  / `conversation.summary-max-words` so there's simply less to generate.
 
 ## What's new in 1.07
 
@@ -385,7 +402,7 @@ thread.
 ## Troubleshooting
 
 - **Plugin doesn't load / `plugin.yml` seems missing from the jar**: run
-  `unzip -l target/okotu-npc-ai-engine-1.07.jar | grep plugin.yml` after
+  `unzip -l target/okotu-npc-ai-engine-1.08.jar | grep plugin.yml` after
   building. A stale `target/` from a partial build can cause this - try
   `mvn clean package` from scratch.
 - **MySQL connection errors on startup**: check `active-profile` matches a
